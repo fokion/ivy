@@ -9,3 +9,10 @@ pluginManagement {
     }
 }
 rootProject.name='ivy'
+include 'modules:shell'
+findProject(':modules:shell')?.name = 'shell'
+include 'modules:core'
+findProject(':modules:core')?.name = 'core'
+include 'modules:html'
+findProject(':modules:html')?.name = 'html'
+
