@@ -1,0 +1,25 @@
+---
+name: Interpolation POC
+vars:
+  accept: "text/html"
+
+testcases:
+  - name: GetVar
+    steps:
+      - type: http
+        method: GET
+        url: "http://example.com"
+        assertions:
+          - result.statuscode ShouldEqual 200
+        vars:
+          accept:
+            from: result.headers.Content-Type
+
+  - name: UseVar
+    steps:
+      - type: exec
+        info: "{{ .GetVar.accept }}"
+        script: echo "{{ .GetVar.accept }}"
+        assertions:
+          - result.code ShouldEqual 0
+          - result.systemout ShouldContainSubstring text/html

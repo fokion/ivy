@@ -1,0 +1,84 @@
+package assertions
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"time"
+)
+
+var recordStart = time.Now()
+
+func enc(v interface{}) interface{} {
+	switch x := v.(type) {
+	case nil:
+		return map[string]interface{}{"t": "nil"}
+	case string:
+		return map[string]interface{}{"t": "string", "v": x}
+	case json.Number:
+		return map[string]interface{}{"t": "number", "v": string(x)}
+	case bool:
+		return map[string]interface{}{"t": "bool", "v": x}
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return map[string]interface{}{"t": "int", "v": fmt.Sprint(x)}
+	case float32, float64:
+		return map[string]interface{}{"t": "float", "v": fmt.Sprint(x)}
+	case time.Time:
+		return map[string]interface{}{"t": "time", "offset": x.Sub(recordStart).Nanoseconds(), "v": x.Format(time.RFC3339Nano)}
+	case []interface{}:
+		out := []interface{}{}
+		for _, e := range x {
+			out = append(out, enc(e))
+		}
+		return map[string]interface{}{"t": "list", "v": out}
+	case map[string]interface{}:
+		if x == nil {
+			return map[string]interface{}{"t": "nil", "go": "map[string]interface {}"}
+		}
+		out := map[string]interface{}{}
+		for k, e := range x {
+			out[k] = enc(e)
+		}
+		return map[string]interface{}{"t": "map", "v": out}
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		out := []interface{}{}
+		for i := 0; i < rv.Len(); i++ {
+			out = append(out, enc(rv.Index(i).Interface()))
+		}
+		return map[string]interface{}{"t": "list", "v": out, "go": rv.Type().String()}
+	case reflect.Map:
+		if rv.IsNil() {
+			return map[string]interface{}{"t": "nil", "go": rv.Type().String()}
+		}
+		out := map[string]interface{}{}
+		for _, k := range rv.MapKeys() {
+			out[fmt.Sprint(k.Interface())] = enc(rv.MapIndex(k).Interface())
+		}
+		return map[string]interface{}{"t": "map", "v": out, "go": rv.Type().String()}
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return map[string]interface{}{"t": "nil", "go": rv.Type().String()}
+		}
+	}
+	return map[string]interface{}{"t": "other", "go": reflect.TypeOf(v).String(), "v": fmt.Sprint(v)}
+}
+
+func record(fn, name string, actual interface{}, expected []interface{}, wantErr bool, err error) error {
+	f, _ := os.OpenFile("/out/assertions.jsonl", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	defer f.Close()
+	exp := []interface{}{}
+	for _, e := range expected {
+		exp = append(exp, enc(e))
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	line, _ := json.Marshal(map[string]interface{}{"func": fn, "name": name, "actual": enc(actual), "expected": exp, "wantErr": wantErr, "goErr": msg})
+	f.Write(append(line, '\n'))
+	return err
+}

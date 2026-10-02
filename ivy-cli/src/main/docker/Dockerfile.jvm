@@ -1,0 +1,15 @@
+####
+# ivy on the JVM. Build the application first, from the repository root:
+#
+#   ./gradlew :ivy-cli:build
+#
+# then the image, with ivy-cli as the context:
+#
+#   docker build -f ivy-cli/src/main/docker/Dockerfile.jvm -t ivy-jvm ivy-cli
+#
+# Unlike the native binary, the JVM image can load connector bundles (--bundles-dir).
+###
+FROM eclipse-temurin:25-jre
+COPY build/quarkus-app/ /opt/ivy/
+WORKDIR /work/
+ENTRYPOINT ["java", "-jar", "/opt/ivy/quarkus-run.jar"]

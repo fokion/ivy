@@ -1,0 +1,5 @@
+plugins {
+    id 'java-library'
+}
+
+// The connector SPI: no dependencies, shared by ivy and every connector bundle.

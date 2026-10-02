@@ -1,0 +1,17 @@
+executor: foobar_http_get_user
+input:
+  id: {}
+steps:
+  - type: foobar_http_get
+    id: "{{.input.id}}"
+    res: users
+    assertions:
+      - result.statuscode ShouldEqual 200
+    vars:
+      statuscode:
+        from: result.statuscode
+      bodyjson:
+        from: result.bodyjson
+output:
+  statuscode: "{{.statuscode}}"
+  body: "{{.bodyjson}}"

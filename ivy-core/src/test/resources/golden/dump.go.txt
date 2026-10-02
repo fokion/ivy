@@ -1,0 +1,80 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/fsamin/go-dump"
+)
+
+func enc(lower bool, prefix string) *dump.Encoder {
+	e := dump.NewDefaultEncoder()
+	e.ExtraFields.Len = true
+	e.ExtraFields.Type = true
+	e.ExtraFields.DetailedStruct = true
+	e.ExtraFields.DetailedMap = true
+	e.ExtraFields.DetailedArray = true
+	e.ExtraFields.UseJSONTag = true
+	e.Prefix = prefix
+	if lower {
+		f := dump.WithDefaultFormatter()
+		e.Formatters = []dump.KeyFormatterFunc{func(s string, level int) string {
+			if level == 0 && strings.Contains(s, ".") {
+				pos := strings.Index(s, ".")
+				return strings.ToLower(s[0:pos]) + s[pos:]
+			}
+			if level == 0 {
+				return strings.ToLower(f(s, level))
+			}
+			return f(s, level)
+		}}
+	}
+	return e
+}
+
+type Inner struct {
+	Name string `json:"name"`
+}
+
+type Result struct {
+	Systemout string                 `json:"systemout"`
+	Code      int                    `json:"code"`
+	Items     []interface{}          `json:"items"`
+	Obj       map[string]interface{} `json:"obj"`
+	Inner     Inner                  `json:"inner"`
+	Empty     string                 `json:"empty"`
+	TimeSecs  float64                `json:"timeseconds"`
+}
+
+func show(name string, m interface{}, err error) {
+	if err != nil {
+		panic(err)
+	}
+	b, _ := json.Marshal(m)
+	fmt.Printf("%s=%s\n", name, b)
+}
+
+func main() {
+	h := map[string]interface{}{"Foo Bar": "x", "a": map[string]interface{}{"B": []interface{}{1.0, "two", nil}}, "empty": "", "nil": nil, "n": 1.5, "Up.Per": "y", "a/b:c": true}
+	r := Result{Systemout: "out", Code: 2, Items: []interface{}{map[string]interface{}{"k": "v"}, "x"}, Obj: map[string]interface{}{"z": 1.0}, Inner: Inner{Name: "n"}, TimeSecs: 0.25}
+	m1, e1 := enc(true, "").ToMap(h)
+	show("dump_h", m1, e1)
+	m2, e2 := enc(true, "").ToStringMap(h)
+	show("dumpstring_h", m2, e2)
+	m3, e3 := enc(false, "").ToStringMap(h)
+	show("dumppreserve_h", m3, e3)
+	m4, e4 := enc(true, "").ToMap(r)
+	show("dump_result", m4, e4)
+	m5, e5 := enc(true, "").ToStringMap(r)
+	show("dumpstring_result", m5, e5)
+	arr := []interface{}{map[string]interface{}{"a": 1.0}, "x", []interface{}{"y"}}
+	m6, e6 := enc(true, "result.bodyjson").ToMap(arr)
+	show("dumpprefix_array", m6, e6)
+	m7, e7 := enc(true, "result.bodyjson").ToMap(map[string]interface{}{"a": map[string]interface{}{"b": "c"}})
+	show("dumpprefix_map", m7, e7)
+	m8, e8 := enc(true, "").ToMap(arr)
+	show("dump_array", m8, e8)
+	m9, e9 := enc(true, "").ToMap(map[string]interface{}{"res": r})
+	show("dump_map_struct", m9, e9)
+}

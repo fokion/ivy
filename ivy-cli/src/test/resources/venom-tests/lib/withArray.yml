@@ -1,0 +1,12 @@
+executor: withArray
+input:
+  thearray: []
+
+steps:
+- script: echo '{{.input.thearray}}'
+  info: {{.input.thearray}}
+  vars:
+    systemout:
+      from: result.systemout
+output:
+  foobar: "{{.systemout}}"

@@ -1,0 +1,42 @@
+name: testsuite with a user executor
+testcases:
+- name: testJSON
+  steps:
+  - type: hello
+    myarg: World
+    assertions:
+    - result.display.hello ShouldEqual World
+    - result.therawout ShouldEqual '{"hello":"World"}'
+    - result.therawoutjson.hello ShouldEqual World
+
+- name: testA
+  steps:
+  - type: hello
+    myarg: World
+    assertions:
+    - result.display.hello ShouldEqual World
+    vars:
+      therawout:
+        from: result.therawout
+      hello:
+        from: result.display.hello
+
+- name: testAResultDisplay
+  steps:
+  - script: echo '{{.testA.therawout}}'
+    info: value is "{{.testA.therawout}}"
+    assertions:
+    - result.systemoutjson.hello ShouldEqual World
+
+- name: testB
+  steps:
+  - script: echo "{{.testA.hello}}"
+    assertions:
+    - result.systemout ShouldEqual World
+
+- name: testfoobar
+  steps:
+  - type: foobar
+    bar: hop
+    assertions:
+    - result.foobar ShouldEqual foo-hop

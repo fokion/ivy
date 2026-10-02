@@ -1,0 +1,15 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':ivy-api')
+    implementation "org.snakeyaml:snakeyaml-engine:${snakeyamlEngineVersion}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('xyz/fokion/ivy/core/version.properties') {
+        expand(version: project.version)
+    }
+}

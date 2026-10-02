@@ -1,0 +1,24 @@
+name: Templating language testsuite
+vars:
+  api.foo: 'http://api/foo'
+  second: 'venomWithTmpl'
+
+testcases:
+- name: testA
+  steps:
+  - type: exec
+    script: echo '{{.api.foo}}'
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldEqual http://api/foo
+    vars:
+      systemout:
+        from: result.systemout
+
+- name: testB
+  steps:
+  - type: exec
+    script: echo 'XXX{{.testA.systemout}}YYY'
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldEqual XXXhttp://api/fooYYY

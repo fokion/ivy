@@ -1,0 +1,29 @@
+# venom's tests/sql.yml, plus file and DDL steps
+name: sql integration testsuite
+
+testcases:
+- name: test-sqlite
+  steps:
+   - type: sql
+     driver: sqlite
+     dsn: "sql/sqlite.db"
+     commands:
+       - "SELECT * FROM test_table;"
+     assertions:
+       - result.queries.__Len__ ShouldEqual 1
+       - result.queries.queries0.rows.rows0.name ShouldEqual test row 1
+
+- name: test-sqlite-memory
+  steps:
+   - type: sql
+     driver: sqlite
+     dsn: ":memory:"
+     commands:
+       - "CREATE TABLE t (id INTEGER, label TEXT)"
+       - "INSERT INTO t VALUES (1, 'one'), (2, 'two')"
+       - "SELECT id, label FROM t ORDER BY id"
+     assertions:
+       - result.queries.__Len__ ShouldEqual 3
+       - result.queries.queries2.rows.__Len__ ShouldEqual 2
+       - result.queries.queries2.rows.rows1.id ShouldEqual 2
+       - result.queries.queries2.rows.rows1.label ShouldEqual two

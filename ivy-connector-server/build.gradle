@@ -1,0 +1,20 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':ivy-core')
+}
+
+application {
+    mainClass = 'xyz.fokion.ivy.server.ConnectorServerMain'
+}
+
+// the integration tests load the sql connector bundle
+evaluationDependsOn(':connectors:sql')
+
+test {
+    def bundle = project(':connectors:sql').tasks.named('bundle')
+    dependsOn bundle
+    systemProperty 'ivy.test.bundles', bundle.get().destinationDirectory.get().asFile.absolutePath
+}
