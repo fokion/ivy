@@ -1,0 +1,19 @@
+####
+# The ivy native binary in a minimal image. Build the binary first, from the repository root:
+#
+#   ./gradlew :ivy-cli:build -Dquarkus.native.enabled=true -Dquarkus.package.jar.enabled=false -Dquarkus.native.container-build=true
+#
+# then the image, with ivy-cli as the context:
+#
+#   docker build -f ivy-cli/src/main/docker/Dockerfile.native -t ivy ivy-cli
+#
+# and run suites mounted in /work:
+#
+#   docker run --rm -v "$PWD:/work" ivy run tests/*.yml
+#
+# ubi-minimal provides /bin/sh, which exec steps need.
+###
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
+WORKDIR /work/
+COPY --chmod=0755 build/*-runner /usr/local/bin/ivy
+ENTRYPOINT ["/usr/local/bin/ivy"]

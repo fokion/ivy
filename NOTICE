@@ -1,0 +1,6 @@
+
+Behaviours ported from Go libraries used by venom:
+- template helpers from Masterminds/sprig (MIT), aokoli/goutils (Apache 2.0) and huandu/xstrings (MIT)
+- value flattening from fsamin/go-dump (Apache 2.0)
+- natural date parsing from tj/go-naturaldate (MIT)
+- type conversions from spf13/cast (MIT) and slugs from gosimple/slug (MPL 2.0)

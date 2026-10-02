@@ -1,0 +1,55 @@
+name:  Readfile testsuite
+testcases:
+- name: testcase-readfile
+  steps:
+  - type: readfile
+    path: readfile/testa.json
+    assertions:
+    - result.contentjson.foo ShouldEqual bar
+
+  - type: readfile
+    path: readfile/testb.json
+    assertions:
+    - result.contentjson.contentjson0.foo2 ShouldEqual bar2
+
+  - type: readfile
+    path: readfile/test.txt
+    assertions:
+    - result.content ShouldContainSubstring multilines
+
+- name: testcase-readfile2
+  steps:
+  - type: readfile
+    path: readfile/testa.json
+    vars:
+      md5sum_foo:
+        from: result.md5sum.readfile_testa.json
+
+  - type: readfile
+    path: readfile/testa.json
+    info: "md5sum_foo: {{.md5sum_foo}}"
+    assertions:
+    - result.err ShouldEqual ""
+    - result.md5sum.readfile_testa.json ShouldEqual "{{.testcase-readfile2.md5sum_foo}}"
+
+- name: testcase-readfile-with-integer
+  steps:
+  - type: readfile
+    path: readfile/testa.json
+    info: "result.contentjson.total: {{.result.contentjson.total}}"
+    assertions:
+    - result.contentjson.total ShouldEqual 42
+
+- name : testcase-readfile-as-yaml
+  steps:
+    - type: readfile
+      path: readfile/test.yml
+      info: "Yaml conversion"
+      vars:
+        payload :
+          from : result.contentjson
+    - name : "Checking the payload"
+      assertions:
+        - payload.key MustEqual 12345
+        - payload.messages.messages0 MustContainKey "name"
+        - payload.messages.messages0 MustContainKey "type"

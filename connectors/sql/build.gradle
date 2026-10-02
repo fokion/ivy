@@ -1,0 +1,6 @@
+// The sql connector: JDBC drivers for SQLite, PostgreSQL and MySQL, embedded in the bundle.
+dependencies {
+    bundled 'org.xerial:sqlite-jdbc:3.53.4.0'
+    bundled 'org.postgresql:postgresql:42.7.13'
+    bundled 'com.mysql:mysql-connector-j:9.7.0'
+}

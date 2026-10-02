@@ -1,38 +1,70 @@
-plugins {
-    id 'java'
-    id 'io.quarkus'
+allprojects {
+    group = 'xyz.fokion'
+    version = '0.0.1'
+
+    repositories {
+        mavenCentral()
+        mavenLocal()
+    }
 }
 
-repositories {
-    mavenCentral()
-    mavenLocal()
+subprojects {
+    apply plugin: 'java'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+    }
+
+    dependencies {
+        testImplementation platform("org.junit:junit-bom:${junitVersion}")
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+        testImplementation 'org.junit.jupiter:junit-jupiter-params'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-parameters'
+    }
+
+    test {
+        useJUnitPlatform()
+    }
 }
 
-dependencies {
-    implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
-    implementation 'io.quarkus:quarkus-picocli'
-    implementation 'io.quarkus:quarkus-micrometer'
-    implementation 'io.quarkus:quarkus-arc'
-    testImplementation 'io.quarkus:quarkus-junit5'
-}
+// Connector bundles: the connector classes plus their dependencies under lib/, loaded by ivy in
+// an isolated class loader. Dependencies to embed go in the 'bundled' configuration.
+configure(subprojects.findAll { it.path.startsWith(':connectors:') }) {
+    configurations {
+        bundled
+        implementation.extendsFrom bundled
+    }
 
-group 'xyz.fokion'
-version '0.0.1'
+    dependencies {
+        compileOnly project(':ivy-api')
+        testImplementation project(':ivy-api')
+    }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
+    tasks.register('bundle', Jar) {
+        group = 'build'
+        description = 'Assembles the connector bundle loaded by ivy'
+        archiveBaseName = "ivy-connector-${project.name}"
+        destinationDirectory = layout.buildDirectory.dir('bundle')
+        from sourceSets.main.output
+        into('lib') {
+            from configurations.bundled
+        }
+        manifest {
+            attributes(
+                    'Ivy-Bundle-Name': project.name,
+                    'Ivy-Bundle-Version': project.version,
+                    'Ivy-Framework-Version': ivyFrameworkVersion)
+        }
+    }
 
-test {
-    systemProperty "java.util.logging.manager", "org.jboss.logmanager.LogManager"
-}
-
-compileJava {
-    options.encoding = 'UTF-8'
-    options.compilerArgs << '-parameters'
-}
-
-compileTestJava {
-    options.encoding = 'UTF-8'
+    tasks.named('assemble') {
+        dependsOn 'bundle'
+    }
 }

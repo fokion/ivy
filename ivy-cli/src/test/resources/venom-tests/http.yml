@@ -1,0 +1,108 @@
+name: HTTP testsuite
+vars:
+  input: "this my input"
+
+testcases:
+- name: get http testcase
+  steps:
+  - type: http
+    method: GET
+    url: https://eu.api.ovh.com/1.0/
+    assertions:
+    - result.body ShouldContainSubstring /dedicated/server
+    - result.body ShouldContainSubstring /ipLoadbalancing
+    - result.statuscode ShouldEqual 200
+    - result.bodyjson.api ShouldBeNil
+    - result.bodyjson.apis ShouldNotBeEmpty
+    - result.bodyjson.apis.apis0 ShouldNotBeNil
+    - result.bodyjson.apis.apis0.path ShouldEqual /allDom
+
+- name: post http testcase
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0/auth/logout
+    assertions:
+    - result.statuscode ShouldEqual 401
+    - result.headers.X-Ovh-Queryid ShouldNotBeEmpty
+    - result.timeseconds ShouldBeLessThan 5
+
+- name: post http testcase with body file
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0/auth/logout
+    bodyfile: http/input.json.tmpl
+    info: "request was {{.result.request.body}}"
+    assertions:
+    - result.request.body ShouldNotBeEmpty
+    - result.request.body ShouldContainSubstring "this my input"
+
+- name: post http multipart
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0/auth/logout
+    multipart_form:
+      file: '@./venom.gif'
+    assertions:
+    - or:
+      - result.statuscode ShouldEqual 401
+      - result.statuscode ShouldEqual 415
+    vars:
+      statuscode:
+        from: result.statuscode
+      body:
+        from: result.bodyjson
+
+- name: post http enhanced assertions
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0/newAccount/rules
+    assertions:
+      - result.statuscode ShouldEqual 200
+      - result.bodyjson.__Type__ ShouldEqual Array
+      # Ensure a minimum of fields are present.
+      - result.bodyjson.__Len__ ShouldBeGreaterThanOrEqualTo 8
+      # Ensure fields have the right keys.
+      - result.bodyjson.bodyjson0 ShouldContainKey fieldName
+      - result.bodyjson.bodyjson0 ShouldContainKey mandatory
+      - result.bodyjson.bodyjson0 ShouldContainKey regularExpression
+      - result.bodyjson.bodyjson0 ShouldContainKey prefix
+      - result.bodyjson.bodyjson0 ShouldContainKey examples
+      - result.bodyjson.bodyjson0 ShouldNotContainKey lol
+      - result.statuscode ShouldNotEqual {{.post-http-multipart.statuscode}}
+
+- name: get http with templated variables
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0/{{.post-http-multipart.body.body0.fieldName}}
+    assertions:
+      - result.statuscode ShouldEqual 404
+      - result.statuscode ShouldNotEqual {{.post-http-multipart.statuscode}}
+
+- name: get http (with skip body)
+  steps:
+  - type: http
+    method: POST
+    url: https://eu.api.ovh.com/1.0
+    skip_body: true
+    skip_headers: true
+    info: request is {{.result.request.method}} {{.result.request.url}} {{.result.request.body}}
+    assertions:
+      - result.statuscode ShouldEqual 405
+      - result.body ShouldBeEmpty
+      - result.headers ShouldBeEmpty
+
+
+- name: get http (with query parameters)
+  steps:
+  - type: http
+    method: GET
+    url: http://localhost:9280/get
+    query_parameters:
+      a: " b"
+    assertions:
+      - result.bodyjson.args.a ShouldEqual " b"

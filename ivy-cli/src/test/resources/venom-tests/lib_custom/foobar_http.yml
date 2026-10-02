@@ -1,0 +1,21 @@
+executor: foobar_http
+input:
+  id: {}
+  method: {}
+  res: {}
+  body: {}
+steps:
+  - type: http
+    method: "{{.input.method}}"
+    url: "https://jsonplaceholder.typicode.com/{{.input.res}}/{{.input.id}}"
+    body: "{{.input.body}}"
+    assertions:
+      - result.statuscode ShouldEqual 200
+    vars:
+      statuscode:
+        from: result.statuscode
+      bodyjson:
+        from: result.bodyjson
+output:
+  statuscode: "{{.statuscode}}"
+  body: "{{.bodyjson}}"

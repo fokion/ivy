@@ -1,0 +1,3 @@
+xyz.fokion.ivy.core.connectors.ExecConnector
+xyz.fokion.ivy.core.connectors.ReadfileConnector
+xyz.fokion.ivy.core.connectors.HttpConnector
