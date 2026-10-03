@@ -57,6 +57,15 @@ class TemplateTest {
     }
 
     @Test
+    void interpolatesVariablesInOrder() {
+        Map<String, Object> with = new java.util.LinkedHashMap<>();
+        with.put("n", "${user.id}");
+        with.put("next", "${n + 1}");
+        with.put("base", "${base}/v2");
+        assertEquals(Map.of("n", 7L, "next", 8L, "base", "http://h/v2"), Template.interpolateInOrder(with, SCOPE));
+    }
+
+    @Test
     void explainsUnknownShellVariables() {
         ExprException e = assertThrows(ExprException.class, () -> render("echo ${HOME}"));
         assertTrue(e.getMessage().contains("to pass ${HOME} to a shell, write $${HOME}"), e.getMessage());

@@ -237,6 +237,20 @@ public final class Template {
         };
     }
 
+    /**
+     * Renders a map of variables in order, each value seeing the ones before it, as in
+     * {@code with: {n: "${arg1 - 1}", link: "row >> nth=${n}"}}. A name that is not defined yet
+     * reads the enclosing scope, so {@code user: "${user}-x"} extends an outer {@code user}.
+     */
+    public static Map<String, Object> interpolateInOrder(Map<?, ?> vars, Scope scope) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Scope inner = scope.child(out);
+        for (Map.Entry<?, ?> e : vars.entrySet()) {
+            out.put(String.valueOf(e.getKey()), interpolate(e.getValue(), inner));
+        }
+        return out;
+    }
+
     /** Adds the variables read by the templates of a parsed YAML value. */
     public static void collectRoots(Object value, Set<String> out) {
         switch (value) {

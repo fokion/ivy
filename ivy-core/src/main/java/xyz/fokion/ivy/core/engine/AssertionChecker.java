@@ -98,7 +98,7 @@ final class AssertionChecker {
         String source = String.valueOf(raw);
         try {
             a = Assertion.of(raw);
-            Scope s = a.with() == null ? scope : scope.child(castMap(Template.interpolate(a.with(), scope)));
+            Scope s = a.with() == null ? scope : scope.child(Template.interpolateInOrder(a.with(), scope));
             source = a.source(s);
             Expression.Traced t = Expression.compile(source).evaluateTraced(s);
             if (Values.truthy(t.value())) {
@@ -119,10 +119,5 @@ final class AssertionChecker {
             f.assertionRequired = raw instanceof Map<?, ?> m && m.containsKey("must");
             return f;
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, ?> castMap(Object v) {
-        return v instanceof Map<?, ?> m ? (Map<String, ?>) m : Map.of();
     }
 }

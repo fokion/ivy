@@ -54,7 +54,7 @@ In YAML, quote an expression that starts with `!` or holds `: `.
 | `cases.<name>.<value>` | values set by an earlier test case (`cases["get token"].token`) |
 | `result` | the result of the step, in its assertions, `retryIf`, `info` and `set` |
 | `index`, `key`, `value` | the item of a ranged step |
-| `with` | variables of one step (Gherkin captures arrive this way) |
+| `with` | variables of one step, in order: each value may use the ones before it (Gherkin captures come first) |
 | `input` | the inputs of a user executor |
 | `env` | environment variables |
 | `ivy` | `ivy.suite.{name, file, path, workdir}`, `ivy.case.{name, tags}`, `ivy.step.number`, `ivy.outputDir`... |

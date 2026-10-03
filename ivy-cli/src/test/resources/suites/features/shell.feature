@@ -19,6 +19,10 @@ Feature: Shell steps
       | 1 | 2 | 3   |
       | 5 | 5 | 10  |
 
+  Scenario: step variables from the captured arguments
+    When I run the number after 3
+    Then the output is "4"
+
   Scenario: doc strings and tables
     When I run the script:
       """

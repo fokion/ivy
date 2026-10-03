@@ -11,17 +11,18 @@ steps:
       type: browser
       actions:
       - screenshot: ${ivy.suite.workdir}/output/${arg1}
-  # the n-th story of the Hacker News front page: its title and link, then a click on it.
-  # The selector is inlined: a step's own 'with' would replace the one carrying arg1.
+  # the n-th story of the Hacker News front page: its title and link, then a click on it
   - expression: 'I open story {int}'
     step:
       type: browser
+      with:
+        link: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
       actions:
-      - text: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+      - text: ${link}
         as: title
-      - attribute: {selector: "tr.athing >> nth=${arg1 - 1} >> .titleline > a", name: href}
+      - attribute: {selector: "${link}", name: href}
         as: href
-      - click: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+      - click: ${link}
       set:
         story: "{rank: number(arg1), title: result.values.title, href: result.values.href, url: result.url, pageTitle: result.title}"
   - expression: 'I am no longer on {string}'

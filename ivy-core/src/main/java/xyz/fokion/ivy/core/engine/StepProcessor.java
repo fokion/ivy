@@ -82,7 +82,7 @@ final class StepProcessor {
                 Range ranged;
                 try {
                     if (step.get("with") instanceof Map<?, ?> with) {
-                        Map<String, Object> values = stringMap(Template.interpolate(with, scope));
+                        Map<String, Object> values = Template.interpolateInOrder(with, scope);
                         values.forEach((k, v) -> {
                             if (ivy.secrets.isName(k)) {
                                 ivy.secrets.add(v);

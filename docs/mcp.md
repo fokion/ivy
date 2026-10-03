@@ -224,12 +224,14 @@ steps:
   - expression: 'I open story {int}'
     step:
       type: browser
+      with:
+        link: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
       actions:
-      - text: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+      - text: ${link}
         as: title
-      - attribute: {selector: "tr.athing >> nth=${arg1 - 1} >> .titleline > a", name: href}
+      - attribute: {selector: "${link}", name: href}
         as: href
-      - click: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+      - click: ${link}
       set:
         story: "{rank: number(arg1), title: result.values.title, href: result.values.href, url: result.url, pageTitle: result.title}"
   - expression: 'I am no longer on {string}'
@@ -251,7 +253,7 @@ steps:
 | Tool | Message | Fix |
 |---|---|---|
 | `validate_suite` | `missing variables [story]` | `set` goes inside `step:`, not next to it |
-| `run_suite` | `unknown variable arg1 ... in template "tr.athing >> nth=${arg1 - 1} ..."` | Gherkin captures reach the step through `with`, and a `with:` in the definition replaces them. Inline the value instead |
+| `run_suite` | `unknown variable arg1 ... in template "tr.athing >> nth=${arg1 - 1} ..."` | Gherkin captures reach the step through `with`, merged with the definition's own `with:`. Its values could not read one another, so `link` could not see `arg1`. Fixed in ivy: `with` values now resolve in order, each seeing the ones before it |
 | output file | `"rank":"3"` | captures are strings: `number(arg1)` |
 
 ### 5. Run it

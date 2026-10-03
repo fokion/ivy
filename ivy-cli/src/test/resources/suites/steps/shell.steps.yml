@@ -5,6 +5,13 @@ steps:
     step: { script: "${arg1}" }
   - expression: 'I run the script:'
     step: { script: "${docstring}" }
+  # a definition's own 'with' sees the captured arguments, and each value the ones before it
+  - expression: 'I run the number after {int}'
+    step:
+      script: "echo ${next}"
+      with:
+        n: "${number(arg1)}"
+        next: "${n + 1}"
   - expression: 'the exit code is {int}'
     assertions: [ "result.exitCode == arg1" ]
   - expression: 'the output is {string}'
