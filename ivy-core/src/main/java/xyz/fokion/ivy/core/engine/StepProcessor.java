@@ -2,6 +2,7 @@ package xyz.fokion.ivy.core.engine;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -499,7 +500,7 @@ final class StepProcessor {
         try {
             for (; attempt <= e.retry(); attempt++) {
                 if (attempt >= 1) {
-                    ctx.log().debug(ctx.fields(), "Sleep " + e.delay() + ", it's " + attempt + " attempt");
+                    ctx.log().debug(ctx.fields(), "Sleep " + Ivy.formatSeconds(e.delay()) + "s, it's " + attempt + " attempt");
                     sleep(e.delay());
                 }
                 userAttempt = e.isUser() ? new TestStepResult() : null;
@@ -573,9 +574,9 @@ final class StepProcessor {
         return resultScope;
     }
 
-    private static void sleep(int seconds) {
+    private static void sleep(Duration delay) {
         try {
-            Thread.sleep(Math.max(0, seconds) * 1000L);
+            Thread.sleep(delay);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
@@ -608,26 +609,43 @@ final class StepProcessor {
             });
         }
         if (e.facade() == null) {
-            return null;
+            // a step without a type runs nothing: it checks the variables and the result of the step before it
+            return previousResult(it.run().tc(), it.tsResult());
         }
         ConnectorFacade.Session session = it.sessions().get(e, ctx, it.scope(), step, it.tsResult());
         return withTimeout(e, () -> session.run(new DefaultStepContext(ctx, it.scope(), step, ctx.log())),
                 () -> it.sessions().discard(e.name(), ctx));
     }
 
+    /** The result of the latest step before {@code current} that has one; {@code null} when there is none. */
+    private static Object previousResult(TestCase tc, TestStepResult current) {
+        List<TestStepResult> results = tc.testStepResults;
+        int i = results.size() - 1;
+        while (i >= 0 && results.get(i) != current) {
+            i--;
+        }
+        for (i--; i >= 0; i--) {
+            Map<String, Object> vars = results.get(i).computedVars;
+            if (vars != null && vars.containsKey("result")) {
+                return vars.get("result");
+            }
+        }
+        return null;
+    }
+
     /** Runs the call within the step timeout, if any; {@code onTimeout} runs when it expires. */
     private static Object withTimeout(ExecutorRunner e, java.util.concurrent.Callable<Object> call, Runnable onTimeout)
             throws Exception {
-        if (e.timeout() == 0) {
+        if (e.timeout().isZero()) {
             return call.call();
         }
         Future<Object> f = TIMEOUTS.submit(call);
         try {
-            return f.get(e.timeout(), TimeUnit.SECONDS);
+            return f.get(e.timeout().toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException ex) {
             f.cancel(true);
             onTimeout.run();
-            throw new IvyException("Timeout after " + e.timeout() + " second(s)");
+            throw new IvyException("Timeout after " + Ivy.formatSeconds(e.timeout()) + " second(s)");
         } catch (ExecutionException ex) {
             Throwable cause = ex.getCause();
             throw cause instanceof Exception c ? c : new IvyException(message(cause), cause);

@@ -50,7 +50,7 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
     public java.util.Map<String, String> resultFields() {
         return Connector.fields(
                 "status", "the HTTP status code",
-                "headers", "the response headers, by name",
+                "headers", "the response headers, by lower-case name: result.headers[\"content-type\"]",
                 "body", "the body, parsed when it is JSON, text otherwise",
                 "bodyText", "the body as text",
                 "request", "the request sent: method, url, headers, body",

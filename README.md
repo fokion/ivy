@@ -60,9 +60,12 @@ together.
 ## Validate without running
 
 `ivy validate [paths...]` parses and checks suites without running a step: it exits with 2 and
-prints the first error of each test case (with `file:line`), and warns about assertions reading a
-result field the step type does not have, such as `result.statuscode` for `http`. Use it in CI
-before running suites.
+prints the first error of each test case (with `file:line`). It warns about assertions reading a
+result field the step type does not have, such as `result.statuscode` for `http`, and about keys a
+step would ignore, such as `methd` for `method`. Use it in CI before running suites.
+
+`retry` is a whole number; `delay` and `timeout` are seconds and may have a fraction (`delay: 0.5`).
+A step without a type runs nothing: it checks variables and the result of the step before it.
 
 ## Writing tests with Claude (MCP)
 
@@ -73,12 +76,17 @@ file, check them, run them and fix them:
 claude mcp add ivy -- ivy mcp --workspace .            # add --no-run to only validate and write
 ```
 
+The variables the suites run with (hosts, credentials) can be given to every tool:
+`ivy mcp --var-from-file env.yml --secret-from-file secrets.yml`; a tool call can also pass `vars` and
+`secrets`. Secrets are hidden in every answer.
+
 | Tool | What it does |
 |---|---|
 | `list_step_types`, `describe_syntax` | step types with their properties and result fields; the syntax |
-| `validate_suite` | checks a suite: errors per test case, warnings |
+| `validate_suite` | checks a suite: errors per test case, warnings (such as a misspelled property) |
 | `write_suite` | writes a suite only when it is valid (checked in its folder first) |
-| `run_suite` | runs a suite: status per test case, failed steps with their values; secrets hidden |
+| `delete_suite` | deletes a suite or step definitions, such as a scratch suite |
+| `run_suite` | runs a suite: status per test case, `info` lines, failed steps with their values (every step's result with `details`); secrets hidden |
 | `evaluate_expression` | evaluates an expression against given values |
 | `list_step_definitions`, `gherkin_steps` | Gherkin definitions; steps without one, with a definition to start from |
 

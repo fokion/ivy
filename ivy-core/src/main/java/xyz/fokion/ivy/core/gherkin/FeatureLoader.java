@@ -193,15 +193,17 @@ public final class FeatureLoader {
                     gherkinSteps.add(new GherkinInfo.Step(g.keyword(), g.text(), g.line(), -1, false, List.of()));
                     continue;
                 }
-                Map<String, Object> previous = steps.getLast();
-                List<Object> merged = new ArrayList<>();
-                if (previous.get("assertions") instanceof List<?> l) {
-                    merged.addAll(l);
-                }
-                merged.addAll(assertions);
-                previous.put("assertions", merged);
-                assertions.forEach(_ -> assertionLines.getLast().add(g.line()));
-                gherkinSteps.add(new GherkinInfo.Step(g.keyword(), g.text(), g.line(), steps.size() - 1, false, assertions));
+                // a step of its own without a type: it checks the result of the step before it once that step is
+                // done, so it also sees what that step set, and leaves that step's own assertions as they are
+                Map<String, Object> check = new LinkedHashMap<>();
+                check.put("name", literal(text));
+                check.put("assertions", assertions);
+                steps.add(check);
+                stepLines.add(g.line());
+                List<Integer> lines = new ArrayList<>();
+                assertions.forEach(_ -> lines.add(g.line()));
+                assertionLines.add(lines);
+                gherkinSteps.add(new GherkinInfo.Step(g.keyword(), g.text(), g.line(), steps.size() - 1, true, assertions));
             }
         }
         tc.steps.addAll(steps);

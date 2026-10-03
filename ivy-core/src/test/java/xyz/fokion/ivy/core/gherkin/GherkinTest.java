@@ -151,29 +151,31 @@ class GherkinTest {
                 ts.testCases.stream().map(tc -> tc.name).toList());
 
         TestCase create = ts.testCases.getFirst();
-        assertEquals(2, create.steps.size());
+        // assertion-only definitions are steps of their own, without a type
+        assertEquals(4, create.steps.size());
         Map<String, Object> post = create.steps.get(1);
         assertEquals("echo ${method} ${path} ${docstring}", post.get("script"));
         assertEquals(Map.of("method", "POST", "path", "/accounts", "arg1", "POST", "arg2", "/accounts",
                 "docstring", "{\"name\": \"ada\"}"), post.get("with"));
         assertEquals("When I POST \"/accounts\" with:", post.get("name"));
-        assertEquals(List.of(
-                Map.of("that", "result.exitCode == arg1", "with", Map.of("arg1", "201")),
-                Map.of("that", "result.stdout contains rows[0].value", "with", Map.of(
-                        "table", List.of(List.of("field", "value"), List.of("name", "ada")),
-                        "rows", List.of(Map.of("field", "name", "value", "ada"))))), post.get("assertions"));
-        assertEquals(List.of(List.of(), List.of(16, 17)), create.lines.assertionLines());
+        assertNull(post.get("assertions"));
+        assertEquals(Map.of("name", "Then the status is 201", "assertions", List.of(
+                Map.of("that", "result.exitCode == arg1", "with", Map.of("arg1", "201")))), create.steps.get(2));
+        assertEquals(List.of(Map.of("that", "result.stdout contains rows[0].value", "with", Map.of(
+                "table", List.of(List.of("field", "value"), List.of("name", "ada")),
+                "rows", List.of(Map.of("field", "name", "value", "ada"))))), create.steps.get(3).get("assertions"));
+        assertEquals(List.of(List.of(), List.of(), List.of(16), List.of(17)), create.lines.assertionLines());
         assertTrue(create.gherkin.problems().isEmpty());
         assertEquals(List.of("@api", "@smoke"), create.gherkin.tags());
 
         TestCase example = ts.testCases.get(1);
         assertEquals("/accounts/1", ((Map<?, ?>) example.steps.get(1).get("with")).get("path"));
         assertEquals(Map.of("that", "result.exitCode == arg1", "with", Map.of("arg1", "200")),
-                ((List<?>) example.steps.get(1).get("assertions")).getFirst());
+                ((List<?>) example.steps.get(2).get("assertions")).getFirst());
         assertEquals(List.of("@api", "@slow"), example.gherkin.tags());
 
         TestCase rule = ts.testCases.get(3);
-        assertEquals(2, rule.steps.size());
+        assertEquals(3, rule.steps.size());
     }
 
     @Test

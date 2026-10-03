@@ -212,8 +212,8 @@ class McpServerTest {
     void listsToolsAndHidesRunWithNoRun() throws Exception {
         Client c = client();
         List<String> names = toolNames(c);
-        assertEquals(List.of("list_step_types", "describe_syntax", "validate_suite", "write_suite", "run_suite",
-                "evaluate_expression", "list_step_definitions", "gherkin_steps"), names);
+        assertEquals(List.of("list_step_types", "describe_syntax", "validate_suite", "write_suite", "delete_suite",
+                "run_suite", "evaluate_expression", "list_step_definitions", "gherkin_steps"), names);
         c.close();
 
         client = new Client(workspace, true);
@@ -356,6 +356,53 @@ class McpServerTest {
     }
 
     @Test
+    void validatesAndWritesSuitesWithTheVariablesTheyWillRunWith() throws Exception {
+        String suite = """
+                name: later
+                testcases:
+                - name: ping
+                  steps:
+                  - script: echo ${base} ${password}
+                """;
+        Client c = client();
+        Map<String, Object> missing = c.tool("write_suite", Map.of("path", "later.yml", "content", suite));
+        assertTrue(isError(missing));
+        assertTrue(Cast.toString(structured(missing).get("errors")).contains("missing variables [base password]"),
+                text(missing));
+        Map<String, Object> args = Map.of("vars", Map.of("base", "http://x"), "secrets", Map.of("password", "pa55word"));
+        Map<String, Object> valid = c.tool("validate_suite", with(args, "path", "later.yml", "content", suite));
+        assertTrue(isError(valid), "nothing was written to validate yet");
+        Map<String, Object> written = c.tool("write_suite", with(args, "path", "later.yml", "content", suite));
+        assertFalse(isError(written), text(written));
+        assertFalse(isError(c.tool("validate_suite", with(args, "path", "later.yml"))));
+    }
+
+    @Test
+    void deletesSuitesOnlyInsideTheWorkspace(@TempDir Path elsewhere) throws Exception {
+        Files.writeString(workspace.resolve("scratch.yml"), VALID);
+        Files.writeString(workspace.resolve("notes.txt"), "keep");
+        Files.writeString(elsewhere.resolve("other.yml"), VALID);
+        Files.createSymbolicLink(workspace.resolve("link.yml"), elsewhere.resolve("other.yml"));
+        Client c = client();
+        Map<String, Object> deleted = c.tool("delete_suite", Map.of("path", "scratch.yml"));
+        assertFalse(isError(deleted), text(deleted));
+        assertFalse(Files.exists(workspace.resolve("scratch.yml")));
+        assertTrue(isError(c.tool("delete_suite", Map.of("path", "scratch.yml"))), "already gone");
+        assertTrue(isError(c.tool("delete_suite", Map.of("path", "notes.txt"))));
+        assertTrue(isError(c.tool("delete_suite", Map.of("path", "link.yml"))));
+        assertTrue(isError(c.tool("delete_suite", Map.of("path", "../other.yml"))));
+        assertTrue(Files.exists(workspace.resolve("notes.txt")) && Files.exists(elsewhere.resolve("other.yml")));
+    }
+
+    private static Map<String, Object> with(Map<String, Object> base, Object... keyValues) {
+        Map<String, Object> m = new LinkedHashMap<>(base);
+        for (int i = 0; i < keyValues.length; i += 2) {
+            m.put((String) keyValues[i], keyValues[i + 1]);
+        }
+        return m;
+    }
+
+    @Test
     void writesNothingOutsideTheWorkspace(@TempDir Path elsewhere) throws Exception {
         Files.createSymbolicLink(workspace.resolve("link"), elsewhere);
         Client c = client();
@@ -426,6 +473,36 @@ class McpServerTest {
                 "vars", Map.of("who", "ada")));
         assertFalse(isError(r), text(r));
         assertTrue(isError(c.tool("run_suite", Map.of("path", "select.yml", "testcases", List.of("third")))));
+    }
+
+    @Test
+    void reportsWhatPassingStepsFoundAndHidesTheGivenSecrets() throws Exception {
+        Files.writeString(workspace.resolve("look.yml"), """
+                name: look
+                testcases:
+                - name: look around
+                  steps:
+                  - script: echo '{"status":"ok"}' ${password}
+                    info: "got ${result.stdout}"
+                """);
+        Client c = client();
+        Map<String, Object> args = Map.of("path", "look.yml", "secrets", Map.of("password", "pa55word"));
+        Map<String, Object> r = c.tool("run_suite", args);
+        assertFalse(isError(r), text(r));
+        String all = Json.write(r);
+        assertFalse(all.contains("pa55word"), all);
+        Map<String, Object> tc = Cast.toStringMap(((List<?>) Cast.toStringMap(
+                ((List<?>) structured(r).get("suites")).getFirst()).get("testcases")).getFirst());
+        assertTrue(Cast.toString(tc.get("info")).contains("got {\"status\":\"ok\"} __hidden__"), tc.toString());
+        assertNull(tc.get("steps"), "results of passing steps only with details");
+
+        Map<String, Object> detailed = c.tool("run_suite", with(args, "details", true));
+        Map<String, Object> dtc = Cast.toStringMap(((List<?>) Cast.toStringMap(
+                ((List<?>) structured(detailed).get("suites")).getFirst()).get("testcases")).getFirst());
+        Map<String, Object> step = Cast.toStringMap(((List<?>) dtc.get("steps")).getFirst());
+        assertEquals("PASS", step.get("status"));
+        assertTrue(Cast.toString(step.get("result")).contains("exitCode"), step.toString());
+        assertFalse(Json.write(detailed).contains("pa55word"));
     }
 
     @Test

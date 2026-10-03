@@ -60,6 +60,39 @@ class ValidationTest {
     }
 
     @Test
+    void refusesRetriesDelaysAndTimeoutsThatAreNotUsable(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("s.yml"), """
+                name: s
+                vars:
+                  later: 2
+                testcases:
+                - name: half a retry
+                  steps:
+                  - script: echo ok
+                    retry: 1.5
+                - name: no number
+                  steps:
+                  - script: echo ok
+                    delay: soon
+                - name: negative
+                  steps:
+                  - script: echo ok
+                    timeout: -1
+                - name: fine
+                  steps:
+                  - script: echo ok
+                    retry: 2
+                    delay: 0.25
+                    timeout: ${later}
+                """);
+        String m = assertThrows(IvyException.class, () -> parse(suite)).getMessage();
+        assertTrue(m.contains("\"half a retry\", step #1: attribute \"retry\" is not a whole number"), m);
+        assertTrue(m.contains("\"no number\", step #1: attribute \"delay\" is not a number of seconds"), m);
+        assertTrue(m.contains("\"negative\", step #1: attribute \"timeout\" must be 0 or more seconds"), m);
+        assertTrue(!m.contains("\"fine\""), m);
+    }
+
+    @Test
     void warnsAboutResultFieldsTheConnectorDoesNotReport(@TempDir Path dir) throws Exception {
         Path suite = Files.writeString(dir.resolve("s.yml"), """
                 name: s
@@ -86,6 +119,56 @@ class ValidationTest {
         assertTrue(warnings.get(1).contains("result.exitcod"), warnings.toString());
         assertTrue(warnings.get(2).contains("step #2: result.statuscode is not a field of http results, which are: status,"),
                 warnings.toString());
+    }
+
+    @Test
+    void warnsAboutKeysTheStepIgnores(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("s.yml"), """
+                name: s
+                testcases:
+                - name: typos
+                  steps:
+                  - type: http
+                    url: http://localhost:1
+                    methd: POST
+                    Skip_Body: true
+                  - script: echo ok
+                    retryif: result.stdout == ""
+                    flavour: vanilla
+                  - url: http://localhost:1
+                    assertions:
+                    - result.exitCode == 0
+                """);
+        List<String> warnings = parse(suite).warnings();
+        assertEquals(4, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).endsWith("step #1: \"methd\" is not a property of http steps and is ignored; "
+                + "did you mean \"method\"?"), warnings.toString());
+        assertTrue(warnings.get(1).endsWith("step #2: \"retryif\" is not a property of exec steps and is ignored; "
+                + "did you mean \"retryIf\"?"), warnings.toString());
+        assertTrue(warnings.get(2).endsWith("\"flavour\" is not a property of exec steps and is ignored; "
+                + "exec steps take: command, script, stdin"), warnings.toString());
+        assertTrue(warnings.get(3).contains("step #3: \"url\" is ignored: the step has no type"), warnings.toString());
+    }
+
+    @Test
+    void refusesAFirstStepWithoutATypeThatReadsAResult(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("s.yml"), """
+                name: s
+                vars:
+                  state: ok
+                testcases:
+                - name: nothing before
+                  steps:
+                  - assertions:
+                    - result.stdout == "ok"
+                - name: variables only
+                  steps:
+                  - assertions:
+                    - state == "ok"
+                """);
+        String m = assertThrows(IvyException.class, () -> parse(suite)).getMessage();
+        assertTrue(m.contains("\"nothing before\", step #1: a step without a type checks the result of the step before it"), m);
+        assertTrue(!m.contains("variables only"), m);
     }
 
     @Test

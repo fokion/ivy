@@ -22,6 +22,10 @@ claude mcp add ivy -- java --enable-native-access=ALL-UNNAMED \
 - `--bundles-dir` loads connectors that are not built in. Without it, `list_step_types` shows only
   `exec`, `http` and `readfile`, and the `browser` step does not exist.
 - `--no-run` gives a server that only validates and writes suites.
+- `--var-from-file`, `--secret-from-file` (and `--var`, `--secret`) give every tool the variables
+  the suites run with, such as the host and credentials of the system under test. Validation then
+  knows them, and secrets are hidden in every answer. The files are read again on each call, so
+  they can change while the server runs. A call can also pass `vars` and `secrets` itself.
 
 ## The loop
 
@@ -33,7 +37,7 @@ The server's instructions tell the client to follow these steps:
 3. **Run and fix**: `run_suite`, then correct the suite from the values it reports.
 
 `validate_suite` checks a suite without writing it. `evaluate_expression` tries out an assertion
-against a value from a run.
+against a value from a run. `delete_suite` removes a scratch suite once it has served.
 
 ## Walkthrough
 
@@ -97,12 +101,13 @@ also saves a screenshot named after the suite, the test case and the step.
 
 ### 4. Make the run show its values
 
-After the fix, `run_suite` returned only `PASS`. A passing run does not report step values or
-`info`. Two ways to see them:
+After the fix, `run_suite` returned `PASS`. Two ways to see what a passing run found:
 
-- **Temporarily**: add an assertion that fails, such as `result.url == "show-me"`. The report then
-  includes the whole result. Remove the assertion afterwards.
-- **For good**: have the suite write its findings to a file, as the final suite below does.
+- **`info`**: every step's `info` lines are in the report, under each test case.
+- **`details: true`**: `run_suite` then also reports the result of every step, not only of the
+  failed ones.
+
+To keep the values after the run, have the suite write them to a file, as the final suite below does.
 
 ### 5. Keep the output
 
@@ -211,7 +216,7 @@ undefined step: "When I open story 3" (hacker-news.feature:9), define it with:
 
 ### 3. Fill them in
 
-Definitions are looked up in the feature's folder and in its `steps/` and `lib/` folders.
+Definitions are looked up in the `steps/` and `lib/` folders next to the feature and in the working directory.
 [`examples/browser/steps/browser.steps.yml`](../examples/browser/steps/browser.steps.yml) replaces
 each `echo TODO` with a real step:
 
@@ -245,8 +250,9 @@ steps:
 - **One page per scenario.** The browser connector keeps the page from one step to the next within
   a scenario (a test case). So `I open`, `I open story` and `I take a screenshot` all act on the
   same page, and one YAML step became several reusable Gherkin steps.
-- **Assertions without a step.** A definition with only `assertions` checks the result of the step
-  before it. `I am no longer on` checks the URL left by the click.
+- **Assertions without a step.** A definition with only `assertions` becomes a step without a type:
+  it runs nothing and checks the result of the step before it, once that step is done, so it also
+  sees the values that step `set`. `I am no longer on` checks the URL left by the click.
 
 ### 4. What validation and the first run caught
 

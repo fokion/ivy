@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
+import xyz.fokion.ivy.core.connector.ConfigurationBinder;
 import xyz.fokion.ivy.core.engine.Ivy.IvyException;
 import xyz.fokion.ivy.core.expr.ExprException;
 import xyz.fokion.ivy.core.expr.Expression;
@@ -87,6 +88,10 @@ final class SuiteValidator {
                 String prefix = stepAt + ": test case \"" + tc.originalName + "\", step #" + (i + 1) + ": ";
                 Set<String> local = new HashSet<>();
                 try {
+                    if (i == 0 && stepType(tc.steps.get(i)).isEmpty() && readsResult(tc.steps.get(i))) {
+                        throw new IllegalArgumentException("a step without a type checks the result of the step "
+                                + "before it, and this one is the first: give it a 'type', or a 'script' or 'command'");
+                    }
                     validateStep(tc.steps.get(i), roots, local, ivy).forEach(w -> ivy.warn(prefix + w));
                 } catch (ExprException | IllegalArgumentException | IvyException e) {
                     // the first error of a test case: the next ones often follow from it
@@ -99,7 +104,8 @@ final class SuiteValidator {
         }
         if (!missing.isEmpty()) {
             errors.add("missing variables " + missing.stream().toList().toString().replace(",", "")
-                    + " in " + ts.filepath);
+                    + " in " + ts.filepath + ": declare them in the suite's vars, or give them when it runs "
+                    + "(--var, --var-from-file, or vars with ivy mcp)");
         }
         if (!errors.isEmpty()) {
             throw new IvyException(String.join("\n", errors));
@@ -113,6 +119,17 @@ final class SuiteValidator {
     static List<String> validateStep(Map<String, Object> step, Set<String> roots, Set<String> local, Ivy ivy)
             throws IvyException {
         legacy(step);
+        // written values are checked now; templates once they are rendered
+        for (String key : List.of("retry", "delay", "timeout")) {
+            if (step.get(key) == null || step.get(key) instanceof String s && Template.has(s)) {
+                continue;
+            }
+            if (key.equals("retry")) {
+                Ivy.intValue(step, key);
+            } else {
+                Ivy.secondsValue(step, key);
+            }
+        }
         Set<String> stepRoots = new HashSet<>();
         // the result fields read after the step: assertions, retryIf, set, info
         Set<String> resultFields = new LinkedHashSet<>();
@@ -189,15 +206,117 @@ final class SuiteValidator {
         }
         stepRoots.removeAll(local);
         roots.addAll(stepRoots);
-        return unknownResultFields(step, resultFields, ivy);
+        List<String> warnings = new ArrayList<>(unknownProperties(step, ivy));
+        warnings.addAll(unknownResultFields(step, resultFields, ivy));
+        return warnings;
     }
 
-    /** Warns about result fields the connector of the step does not report. */
-    private static List<String> unknownResultFields(Map<String, Object> step, Set<String> read, Ivy ivy) {
+    /** Whether a step reads {@code result}, in its assertions, info, set or retryIf. */
+    private static boolean readsResult(Map<String, Object> step) {
+        List<String> read = new ArrayList<>();
+        if (step.get("assertions") instanceof List<?> assertions) {
+            assertions.forEach(a -> read.add(AssertionChecker.Assertion.of(a).expression()));
+        }
+        if (step.get("set") instanceof Map<?, ?> set) {
+            set.values().forEach(v -> read.add(String.valueOf(v)));
+        }
+        read.addAll(Ivy.stringSliceValue(step, "info"));
+        if (step.get("retryIf") instanceof String r) {
+            read.add(r);
+        }
+        return read.stream().anyMatch(s -> expressionOrTemplateRoots(s).contains("result"));
+    }
+
+    /** The keys of a step that are not properties of a connector. */
+    static final Set<String> STEP_KEYS = Set.of("type", "name", "retry", "retryIf", "delay", "timeout", "assertions", "if",
+            "set", "info", "range", "with");
+
+    /** The type of a step: {@code exec} for a script or command without one; empty when it has none. */
+    private static String stepType(Map<String, Object> step) {
         String type = step.get("type") instanceof String t ? t : "";
         if (type.isEmpty() && (step.containsKey("script") || step.containsKey("command"))) {
             type = "exec";
         }
+        return type;
+    }
+
+    /**
+     * Warns about keys that are neither step settings nor properties of the step's connector, such as {@code methd}
+     * for {@code method}: the connector would ignore them.
+     */
+    private static List<String> unknownProperties(Map<String, Object> step, Ivy ivy) {
+        String type = stepType(step);
+        if (type.isEmpty()) {
+            return step.keySet().stream().filter(k -> !STEP_KEYS.contains(k))
+                    .map(k -> "\"" + k + "\" is ignored: the step has no type, so it runs nothing and only checks "
+                            + "the variables and the result of the step before it")
+                    .toList();
+        }
+        if (Template.has(type)) {
+            return List.of();
+        }
+        List<String> properties = ivy.connectorInfo(type)
+                .map(i -> i.properties().stream().map(p -> p.name()).toList())
+                .orElse(List.of());
+        if (properties.isEmpty()) {
+            // a user executor: its keys are its inputs
+            return List.of();
+        }
+        // connectors match their properties ignoring case and underscores; the step settings are read as written
+        Set<String> known = new HashSet<>();
+        properties.forEach(p -> known.add(ConfigurationBinder.normalize(p)));
+        List<String> warnings = new ArrayList<>();
+        for (String key : step.keySet()) {
+            if (STEP_KEYS.contains(key) || known.contains(ConfigurationBinder.normalize(key))) {
+                continue;
+            }
+            List<String> candidates = new ArrayList<>(STEP_KEYS);
+            candidates.addAll(properties);
+            String hint = closest(key, candidates);
+            warnings.add("\"" + key + "\" is not a property of " + type + " steps and is ignored; "
+                    + (hint != null ? "did you mean \"" + hint + "\"?" : type + " steps take: " + String.join(", ", properties)));
+        }
+        return warnings;
+    }
+
+    /** The candidate closest to a mistyped key, within two edits; {@code null} when none is that close. */
+    private static String closest(String key, List<String> candidates) {
+        String k = key.toLowerCase(java.util.Locale.ROOT);
+        String best = null;
+        int bestDistance = 3;
+        for (String c : candidates) {
+            int d = distance(k, c.toLowerCase(java.util.Locale.ROOT));
+            if (d < bestDistance) {
+                best = c;
+                bestDistance = d;
+            }
+        }
+        return best;
+    }
+
+    /** Levenshtein distance. */
+    private static int distance(String a, String b) {
+        int[] previous = new int[b.length() + 1];
+        int[] current = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            previous[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
+            }
+            int[] t = previous;
+            previous = current;
+            current = t;
+        }
+        return previous[b.length()];
+    }
+
+    /** Warns about result fields the connector of the step does not report. */
+    private static List<String> unknownResultFields(Map<String, Object> step, Set<String> read, Ivy ivy) {
+        String type = stepType(step);
         if (read.isEmpty() || type.isEmpty() || Template.has(type)) {
             return List.of();
         }
@@ -263,7 +382,7 @@ final class SuiteValidator {
             try {
                 String prefix = ux.filename() + ": executor \"" + ux.executor() + "\", step #" + (i + 1) + ": ";
                 validateStep(ux.steps().get(i), new HashSet<>(), new HashSet<>(), ivy).forEach(w -> ivy.warn(prefix + w));
-            } catch (ExprException | IllegalArgumentException e) {
+            } catch (ExprException | IllegalArgumentException | IvyException e) {
                 throw new IvyException(ux.filename() + ": executor \"" + ux.executor() + "\", step #" + (i + 1) + ": "
                         + e.getMessage(), e);
             }

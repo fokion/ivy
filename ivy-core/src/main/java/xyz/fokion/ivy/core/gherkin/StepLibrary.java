@@ -31,7 +31,8 @@ import xyz.fokion.ivy.core.yaml.Yaml.YamlException;
  * Captured values are variables of the step: named groups by name, every group as {@code arg1},
  * {@code arg2}..., a doc string as {@code docstring}, a data table as {@code table} (rows of
  * cells) and {@code rows} (objects keyed by the header row). A definition with {@code step} adds
- * a step; one with only {@code assertions} adds them to the previous step.
+ * a step; one with only {@code assertions} adds a step without a type, which checks the result of
+ * the step before it and the values that step set.
  */
 public final class StepLibrary {
 

@@ -106,15 +106,16 @@ public final class ConfigurationBinder {
             if (raw == String.class) {
                 return Cast.toStringStrict(value);
             }
+            // whole numbers only: a fraction is refused, not cut, so "timeout: 0.5" is not quietly 0
             if (raw == int.class || raw == Integer.class) {
-                long l = Cast.toLongStrict(value);
+                long l = Cast.toLongExact(value);
                 if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE) {
                     throw new ConnectorException("'" + name + "': " + l + " is out of range");
                 }
                 return (int) l;
             }
             if (raw == long.class || raw == Long.class) {
-                return Cast.toLongStrict(value);
+                return Cast.toLongExact(value);
             }
             if (raw == double.class || raw == Double.class) {
                 return Cast.toDoubleStrict(value);

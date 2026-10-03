@@ -305,6 +305,94 @@ class EngineTest {
     }
 
     @Test
+    void takesFractionsOfASecondForTimeoutsAndDelays(@TempDir Path dir) throws Exception {
+        long start = System.nanoTime();
+        Ivy ivy = runSuite(dir, """
+                name: fractions
+                testcases:
+                - name: slow
+                  steps:
+                  - script: sleep 5
+                    timeout: 0.5
+                - name: retried
+                  steps:
+                  - script: echo no
+                    retry: 2
+                    delay: 0.4
+                    assertions:
+                    - result.stdout == "yes"
+                """);
+        double seconds = (System.nanoTime() - start) / 1e9;
+        // the timeout cut the sleep, and both pauses of 0.4s were taken
+        assertTrue(seconds >= 0.8 && seconds < 4, "took " + seconds + "s");
+        assertTrue(errors(ivy).getFirst().contains("Timeout after 0.5 second(s)"), errors(ivy).toString());
+        TestStepResult r = ivy.tests().testSuites.getFirst().testCases.get(1).testStepResults.getFirst();
+        assertEquals(2, r.retries);
+    }
+
+    @Test
+    void checksThePreviousResultInAStepWithoutAType(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: checks
+                testcases:
+                - name: check
+                  steps:
+                  - script: echo 42
+                    set:
+                      answer: result.stdout
+                  - assertions:
+                    - result.stdout == "42"
+                    - answer == "42"
+                  - assertions:
+                    - result.stdout == "42"
+                """);
+        assertEquals(List.of(), errors(ivy));
+    }
+
+    @Test
+    void runsGherkinChecksAfterTheStepBeforeThem(@TempDir Path dir) throws Exception {
+        Files.createDirectories(dir.resolve("steps"));
+        Files.writeString(dir.resolve("steps/order.steps.yml"), """
+                steps:
+                  - expression: 'I order {int}'
+                    step:
+                      script: "echo '{\\"id\\": 7, \\"cups\\": ${arg1}}'"
+                      set:
+                        order: result.json
+                  - expression: 'the order has {int} cups'
+                    assertions: [ "order.cups == number(arg1)", "result.json.id == 7" ]
+                  - expression: 'the shop fails with {int}'
+                    step: { script: "exit ${arg1}" }
+                  - expression: 'the exit code is {int}'
+                    assertions: [ "result.exitCode == number(arg1)" ]
+                """);
+        Path feature = Files.writeString(dir.resolve("order.feature"), """
+                Feature: orders
+                  Scenario: the check sees what the step set
+                    When I order 2
+                    Then the order has 2 cups
+                  Scenario: a check does not replace the default assertions of the step
+                    When the shop fails with 3
+                    Then the exit code is 3
+                """);
+        Ivy ivy = ivy().outputDir(dir.resolve("out").toString());
+        ivy.initLogger();
+        try {
+            ivy.parse(List.of(feature.toString()));
+            ivy.process();
+        } finally {
+            ivy.close();
+        }
+        List<TestCase> cases = ivy.tests().testSuites.getFirst().testCases;
+        assertEquals(Status.PASS, cases.get(0).status, errors(ivy).toString());
+        assertEquals(2, cases.get(0).testStepResults.size());
+        // the failing exec step keeps its own result.exitCode == 0; the check after it passes on its own
+        List<TestStepResult> failing = cases.get(1).testStepResults;
+        assertEquals(Status.FAIL, failing.get(0).status);
+        assertEquals(Status.PASS, failing.get(1).status);
+    }
+
+    @Test
     void setsValuesForLaterStepsAndTestCases(@TempDir Path dir) throws Exception {
         Ivy ivy = runSuite(dir, """
                 name: set

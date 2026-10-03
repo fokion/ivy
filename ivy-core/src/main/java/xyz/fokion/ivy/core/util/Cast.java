@@ -69,6 +69,25 @@ public final class Cast {
         }
     }
 
+    /**
+     * A whole number: as {@link #toLongStrict}, but a number with a fraction ({@code 0.5}, {@code "1.5"}) is an error
+     * instead of being cut to its integer part.
+     */
+    public static long toLongExact(Object v) {
+        boolean fraction = switch (v) {
+            case Double d -> d % 1 != 0;
+            case Float f -> f % 1 != 0;
+            case BigDecimal b -> b.stripTrailingZeros().scale() > 0;
+            case String s when STRING_NUMBER.matcher(s.strip()).matches() && s.contains(".") ->
+                    new BigDecimal(s.strip().endsWith(".") ? s.strip() + "0" : s.strip()).stripTrailingZeros().scale() > 0;
+            case null, default -> false;
+        };
+        if (fraction) {
+            throw new CastException(GoFormat.sprint(v) + " is not a whole number");
+        }
+        return toLongStrict(v);
+    }
+
     /** {@code cast.ToInt64E}. */
     public static long toLongStrict(Object v) {
         return switch (v) {

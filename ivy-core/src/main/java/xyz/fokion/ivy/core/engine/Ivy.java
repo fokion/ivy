@@ -6,6 +6,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -614,8 +615,8 @@ public final class Ivy {
         }
         int retry = intValue(step, "retry");
         String retryIf = raw.get("retryIf") instanceof String s ? s : "";
-        int delay = intValue(step, "delay");
-        int timeout = intValue(step, "timeout");
+        Duration delay = secondsValue(step, "delay");
+        Duration timeout = secondsValue(step, "timeout");
         List<String> info = stringSliceValue(raw, "info");
 
         if (name.isEmpty()) {
@@ -648,11 +649,35 @@ public final class Ivy {
     }
 
     static int intValue(Map<String, Object> step, String name) throws IvyException {
+        long n;
         try {
-            return (int) Cast.toLongStrict(step.get(name));
+            n = Cast.toLongExact(step.get(name));
         } catch (Cast.CastException e) {
-            throw new IvyException("attribute \"" + name + "\" is not an integer");
+            throw new IvyException("attribute \"" + name + "\" is not a whole number: " + e.getMessage());
         }
+        if (n < 0 || n > Integer.MAX_VALUE) {
+            throw new IvyException("attribute \"" + name + "\" must be 0 or more, got " + n);
+        }
+        return (int) n;
+    }
+
+    /** A duration in seconds, whole or not ({@code 0.5} is half a second); zero when absent. */
+    static Duration secondsValue(Map<String, Object> step, String name) throws IvyException {
+        double seconds;
+        try {
+            seconds = Cast.toDoubleStrict(step.get(name));
+        } catch (Cast.CastException e) {
+            throw new IvyException("attribute \"" + name + "\" is not a number of seconds: " + e.getMessage());
+        }
+        if (!(seconds >= 0) || Double.isInfinite(seconds)) {
+            throw new IvyException("attribute \"" + name + "\" must be 0 or more seconds, got " + step.get(name));
+        }
+        return Duration.ofNanos(Math.round(seconds * 1e9));
+    }
+
+    /** Seconds as written in suites: {@code 1}, {@code 0.5}. */
+    static String formatSeconds(Duration d) {
+        return java.math.BigDecimal.valueOf(d.toNanos(), 9).stripTrailingZeros().toPlainString();
     }
 
     static List<String> stringSliceValue(Map<String, Object> step, String name) {

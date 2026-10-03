@@ -54,7 +54,16 @@ final class Tools {
             1. call list_step_types and describe_syntax to learn the step types, their result fields and the syntax;
             2. write the suite with write_suite: it is saved only when it is valid, otherwise the errors are returned;
             3. run it with run_suite, and fix the assertions from the reported values until it passes.
-            For a .feature file, gherkin_steps lists the steps without a definition and proposes one.""";
+            For a .feature file, gherkin_steps lists the steps without a definition and proposes one.
+            Variables a suite gets when it runs (hosts, credentials) are passed as vars, and secrets as secrets, to
+            validate_suite, write_suite and run_suite; the server may also have been started with them
+            (--var-from-file, --secret-from-file). run_suite reports the info lines of every step, and with details
+            the result of every step. delete_suite removes a suite that is no longer wanted.""";
+
+    private static final Map<String, Object> VARS = Map.of("type", "object",
+            "description", "variables, as on the command line, e.g. {\"base\": \"http://localhost:8080\"}");
+    private static final Map<String, Object> SECRETS = Map.of("type", "object",
+            "description", "variables whose values are hidden in every answer and report, e.g. {\"password\": \"...\"}");
 
     /** The longest string kept in the values a run reports. */
     static final int MAX_VALUE = 2000;
@@ -126,24 +135,34 @@ final class Tools {
         add("validate_suite", "Validate a suite",
                 "Checks a suite (.yml, .yaml or .feature) in the workspace without running it. Returns the errors, "
                         + "one per test case with file:line, and warnings such as an assertion reading an unknown result field.",
-                schema(Map.of("path", string("the suite, relative to the workspace")), List.of("path")), readOnly(),
+                schema(Map.of("path", string("the suite, relative to the workspace"), "vars", VARS, "secrets", SECRETS),
+                        List.of("path")), readOnly(),
                 (a, c) -> validateSuite(a));
         add("write_suite", "Write a suite",
                 "Writes a suite (.yml, .yaml, .feature or .steps.yml) in the workspace, only if it is valid: it is checked in "
                         + "its folder first, so relative fixture and script paths resolve. When invalid, nothing is written "
                         + "and the errors are returned. Replaces an existing file.",
                 schema(Map.of("path", string("the file to write, relative to the workspace"),
-                        "content", string("the YAML or Gherkin content")), List.of("path", "content")),
+                        "content", string("the YAML or Gherkin content"), "vars", VARS, "secrets", SECRETS),
+                        List.of("path", "content")),
                 annotations(false, true, true), (a, c) -> writeSuite(a));
+        add("delete_suite", "Delete a suite",
+                "Deletes a suite (.yml, .yaml or .feature) or step definitions (.steps.yml) from the workspace, such as a "
+                        + "scratch suite used to explore.",
+                schema(Map.of("path", string("the file to delete, relative to the workspace")), List.of("path")),
+                annotations(false, true, false), (a, c) -> deleteSuite(a));
         if (!noRun) {
             add("run_suite", "Run a suite",
                     "Runs a suite of the workspace and returns the status of each test case, with the errors, values and "
                             + "results of failed steps. Steps run for real: exec steps run commands, http steps send requests.",
                     schema(Map.of("path", string("the suite, relative to the workspace"),
-                            "vars", Map.of("type", "object", "description", "variables, as on the command line"),
+                            "vars", VARS,
+                            "secrets", SECRETS,
                             "tags", string("a tag expression for Gherkin scenarios, e.g. \"@smoke and not @slow\""),
                             "testcases", Map.of("type", "array", "items", Map.of("type", "string"),
-                                    "description", "run only these test cases, by name")),
+                                    "description", "run only these test cases, by name"),
+                            "details", Map.of("type", "boolean",
+                                    "description", "also report the result of every step, not only of failed ones")),
                             List.of("path")),
                     annotations(false, true, false), this::runSuite);
         }
@@ -245,12 +264,26 @@ final class Tools {
 
     private Map<String, Object> validateSuite(Map<String, Object> args) throws ToolException {
         Path path = existingFile(Cast.toString(args.get("path")));
-        return validation(path, path);
+        return validation(path, path, args);
     }
 
-    /** Parses a suite; {@code shown} is the path errors name, when {@code file} is a temporary copy. */
-    private Map<String, Object> validation(Path file, Path shown) throws ToolException {
+    /** The variables and secrets of a call, added to its run. */
+    private static void addVariables(Ivy ivy, Map<String, Object> args) {
+        if (args.get("vars") instanceof Map<?, ?> vars) {
+            ivy.addVariables(Cast.toStringMap(vars));
+        }
+        if (args.get("secrets") instanceof Map<?, ?> secrets) {
+            ivy.addSecrets(Cast.toStringMap(secrets));
+        }
+    }
+
+    /**
+     * Parses a suite with the variables of the call; {@code shown} is the path errors name, when {@code file} is a
+     * temporary copy.
+     */
+    private Map<String, Object> validation(Path file, Path shown, Map<String, Object> args) throws ToolException {
         Ivy ivy = newRun(discard());
+        addVariables(ivy, args);
         Map<String, Object> m = new LinkedHashMap<>();
         try {
             ivy.parse(List.of(file.toString()));
@@ -288,7 +321,7 @@ final class Tools {
         Files.writeString(temp, text);
         try {
             if (!name.endsWith(".steps.yml") && !name.endsWith(".steps.yaml")) {
-                Map<String, Object> checked = validation(temp, target);
+                Map<String, Object> checked = validation(temp, target, args);
                 if (Boolean.TRUE.equals(checked.get("isError"))) {
                     return checked;
                 }
@@ -300,6 +333,16 @@ final class Tools {
         return success(Map.of("written", relative(target)));
     }
 
+    private Map<String, Object> deleteSuite(Map<String, Object> args) throws ToolException, IOException {
+        Path target = existingFile(Cast.toString(args.get("path")));
+        String name = target.getFileName().toString();
+        if (!(name.endsWith(".yml") || name.endsWith(".yaml") || name.endsWith(".feature"))) {
+            throw new ToolException("only suites and step definitions are deleted, not \"" + name + "\"");
+        }
+        Files.delete(target);
+        return success(Map.of("deleted", relative(target)));
+    }
+
     private Map<String, Object> runSuite(Map<String, Object> args, Call call) throws ToolException, IOException {
         Path path = existingFile(Cast.toString(args.get("path")));
         Path out = Files.createTempDirectory("ivy-mcp-run-");
@@ -308,9 +351,7 @@ final class Tools {
         ivy.colors(false).outputDir(out.toString());
         call.attach(ivy);
         try {
-            if (args.get("vars") instanceof Map<?, ?> vars) {
-                ivy.addVariables(Cast.toStringMap(vars));
-            }
+            addVariables(ivy, args);
             if (args.get("tags") instanceof String tags && !tags.isBlank()) {
                 ivy.tags(tags);
             }
@@ -333,7 +374,8 @@ final class Tools {
             ivy.close();
             delete(out);
         }
-        Map<String, Object> report = report(ivy, console.toString(StandardCharsets.UTF_8));
+        Map<String, Object> report = report(ivy, console.toString(StandardCharsets.UTF_8),
+                Boolean.TRUE.equals(args.get("details")));
         // secrets are hidden in the whole answer, whatever field they reached
         String hidden = ivy.secrets().hide(Json.write(report, Json.COMPACT));
         Map<String, Object> safe = Cast.toStringMap(Json.parse(hidden));
@@ -358,7 +400,7 @@ final class Tools {
         }
     }
 
-    private Map<String, Object> report(Ivy ivy, String console) {
+    private Map<String, Object> report(Ivy ivy, String console, boolean details) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("status", Status.name(ivy.tests().status));
         List<Object> suites = new ArrayList<>();
@@ -376,13 +418,27 @@ final class Tools {
                     cm.put("skipped", tc.skipped.stream().map(s -> s.value()).toList());
                 }
                 List<Object> failed = new ArrayList<>();
+                List<Object> info = new ArrayList<>();
+                List<Object> steps = new ArrayList<>();
                 for (TestStepResult r : tc.testStepResults) {
                     if (r.hasErrors()) {
                         failed.add(failedStep(r));
+                    } else if (r.computedInfo != null) {
+                        // what passing steps found: failed steps report theirs with their errors
+                        info.addAll(r.computedInfo);
                     }
+                    if (details) {
+                        steps.add(step(r));
+                    }
+                }
+                if (!info.isEmpty()) {
+                    cm.put("info", info);
                 }
                 if (!failed.isEmpty()) {
                     cm.put("failedSteps", failed);
+                }
+                if (details) {
+                    cm.put("steps", steps);
                 }
                 cases.add(cm);
             }
@@ -397,6 +453,19 @@ final class Tools {
             m.put("cancelled", true);
         }
         m.put("console", tail(console, 4 * MAX_VALUE));
+        return m;
+    }
+
+    /** A step of any status, with its result: what run_suite reports with details. */
+    private static Map<String, Object> step(TestStepResult r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("step", r.number);
+        m.put("name", r.name);
+        m.put("status", Status.name(r.status));
+        Object result = r.computedVars == null ? null : r.computedVars.get("result");
+        if (result != null) {
+            m.put("result", Json.write(result, Json.COMPACT.withMaxString(MAX_VALUE)));
+        }
         return m;
     }
 
