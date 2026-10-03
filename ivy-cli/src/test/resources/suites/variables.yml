@@ -1,0 +1,56 @@
+name: variables
+vars:
+  greeting: hello
+  nested:
+    first: one
+    second: two
+  composed: ${greeting} world
+testcases:
+- name: suite variables
+  steps:
+  - script: echo ${greeting} ${nested.first} ${composed}
+    assertions:
+    - result.stdout == "hello one hello world"
+    - nested.second == "two"
+- name: built-in variables
+  steps:
+  - script: echo ${ivy.suite.name} ${ivy.case.name} ${ivy.step.number}
+    assertions:
+    - result.stdout == "variables built-in variables 1"
+  - script: test -d ${ivy.suite.workdir} && echo ${ivy.suite.file}
+    assertions:
+    - result.stdout == "variables.yml"
+- name: command line and files
+  steps:
+  - script: echo '${from_file} ${from_env} ${array_from_var}'
+    assertions:
+    - result.stdout == 'file env ["biz","buz"]'
+    - array_from_var[1] == "buz"
+- name: test case variables
+  vars:
+    local: ${greeting}-local
+    numbers: [1, 2, 3]
+  steps:
+  - script: echo ${local} ${numbers.length}
+    assertions:
+    - result.stdout == "hello-local 3"
+- name: extract
+  steps:
+  - script: echo 'order 42 created'
+    set:
+      line: result.stdout
+      id: result.stdout.match("order ([0-9]+)")[1]
+      missing: result.nothing ?? "fallback"
+  - script: echo ${line} / ${id} / ${missing}
+    assertions:
+    - result.stdout == "order 42 created / 42 / fallback"
+- name: reuse previous test case
+  steps:
+  - script: echo ${cases.extract.id}
+    assertions:
+    - result.stdout == 42
+- name: environment
+  steps:
+  - script: echo ${env.from_env_plain ?? "unset"}
+    assertions:
+    - result.stdout == "unset"

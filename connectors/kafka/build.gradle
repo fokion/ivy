@@ -1,0 +1,7 @@
+// The kafka connector: produces and consumes messages, with optional Avro and a schema registry.
+dependencies {
+    bundled 'org.apache.kafka:kafka-clients:4.3.1'
+    bundled 'org.apache.avro:avro:1.12.2'
+    bundled "org.slf4j:slf4j-nop:${slf4jVersion}"
+    testImplementation 'org.testcontainers:testcontainers-kafka'
+}

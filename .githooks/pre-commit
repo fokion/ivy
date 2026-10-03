@@ -1,0 +1,6 @@
+#!/bin/sh
+# Git pre-commit hook to verify code style before commit
+set -e
+
+echo "Checking code style before commit..."
+./gradlew spotlessCheck

@@ -1,5 +1,0 @@
-name: testsuite with a user executor
-testcases:
-- name: Testy test part 1
-  steps:
-  - type: user_executor_no_param

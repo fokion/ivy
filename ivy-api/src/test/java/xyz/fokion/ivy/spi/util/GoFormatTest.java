@@ -1,7 +1,5 @@
 package xyz.fokion.ivy.spi.util;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,6 +8,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 /** Expected values were produced by Go 1.25. */
 class GoFormatTest {
@@ -89,8 +89,26 @@ class GoFormatTest {
         Object v = Json.parse(" {\"a\": [1, 2.5, \"s\\u00e9\", true, null, {}], \"b\": -12} ");
         assertEquals(Map.of("a", Arrays.asList(1L, 2.5, "sé", true, null, Map.of()), "b", -12L), v);
         assertEquals(List.of(), Json.parse("[]"));
-        assertEquals(false, Json.isValid("{\"a\":}"));
-        assertEquals(false, Json.isValid("01"));
-        assertEquals(false, Json.isValid("[1] x"));
+        assertFalse(Json.isValid("{\"a\":}"));
+        assertFalse(Json.isValid("01"));
+        assertFalse(Json.isValid("[1] x"));
+    }
+
+    @Test
+    void rejectsMalformedAndHostileJson() {
+        assertFalse(Json.isValid("1."));
+        assertFalse(Json.isValid("-.5"));
+        assertFalse(Json.isValid("1e400"));
+        assertFalse(Json.isValid("\"\\u-001\""));
+        assertFalse(Json.isValid("[".repeat(100_000)));
+        assertTrue(Json.isValid("[".repeat(500) + "]".repeat(500)));
+        assertEquals("\uFFFDx", Json.parse("\"\\ud800x\""));
+        assertEquals("😀", Json.parse("\"\\ud83d\\ude00\""));
+    }
+
+    @Test
+    void writesNullForNonFiniteAndNullArrayItems() {
+        assertEquals("[null,null,\"x\"]", Json.write(new Object[] {Double.NaN, null, "x"}));
+        assertEquals("[<nil> x]", GoFormat.sprint(new Object[] {null, "x"}));
     }
 }

@@ -1,0 +1,111 @@
+name: kafka
+testcases:
+- name: json messages
+  steps:
+  - type: kafka
+    clientType: producer
+    addrs: ["${kafka}"]
+    messages:
+    - topic: json
+      key: greeting
+      headers:
+        source: ivy
+      value: '{"hello":"bar"}'
+    - topic: json
+      value:
+        hello: second
+  - type: kafka
+    clientType: consumer
+    addrs: ["${kafka}"]
+    groupID: json-reader
+    initialOffset: oldest
+    messageLimit: 2
+    topics: [json]
+    timeout: 20
+    assertions:
+    - result.messages.length == 2
+    - result.messages[0].value.hello == "bar"
+    - result.messages[1].value.hello == "second"
+    - result.messages[0].key == "greeting"
+    - result.messages[0].headers.source == "ivy"
+    - result.messages[0].raw == '{"hello":"bar"}'
+    - isEmpty(result.error)
+
+- name: offsets are committed
+  steps:
+  - type: kafka
+    client_type: producer
+    addrs: ["${kafka}"]
+    messages:
+    - topic: json
+      value: '{"hello":"third"}'
+  - type: kafka
+    client_type: consumer
+    addrs: ["${kafka}"]
+    group_id: json-reader
+    initial_offset: oldest
+    message_limit: 1
+    topics: [json]
+    timeout: 20
+    assertions:
+    - result.messages[0].value.hello == "third"
+
+- name: key filter and wait
+  steps:
+  - type: kafka
+    clientType: producer
+    addrs: ["${kafka}"]
+    messagesFile: messages.json
+  - type: kafka
+    clientType: consumer
+    addrs: ["${kafka}"]
+    groupID: filter-reader
+    initialOffset: oldest
+    keyFilter: b
+    waitFor: 8
+    timeout: 10
+    topics: [from-file]
+    assertions:
+    - result.messages.length == 1
+    - result.messages[0].value.n == 2
+
+- name: nothing to consume
+  steps:
+  - type: kafka
+    clientType: consumer
+    addrs: ["${kafka}"]
+    groupID: empty-reader
+    initialOffset: oldest
+    messageLimit: 1
+    topics: [empty]
+    timeout: 3
+    assertions:
+    - result.error contains "kafka consume failed"
+
+- name: avro
+  steps:
+  - type: kafka
+    clientType: producer
+    addrs: ["${kafka}"]
+    withAVRO: true
+    schemaRegistryAddr: ${registry}
+    messages:
+    - topic: avro
+      valueFile: values/message1.json
+      avroSchemaFile: schemas/message.avsc
+    - topic: avro
+      valueFile: values/message2.json
+  - type: kafka
+    clientType: consumer
+    addrs: ["${kafka}"]
+    withAVRO: true
+    schemaRegistryAddr: ${registry}
+    groupID: avro-reader
+    initialOffset: oldest
+    messageLimit: 2
+    topics: [avro]
+    timeout: 20
+    assertions:
+    - result.messages[0].value.id == 1
+    - result.messages[0].value.message == "Some test"
+    - result.messages[1].value.id == 2

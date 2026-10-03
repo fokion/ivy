@@ -1,0 +1,35 @@
+# Opens Hacker News, clicks the 3rd story and keeps what it found in examples/browser/output:
+# a screenshot of the story and hacker-news.json with its title, link and landing page.
+# Needs the internet. Written and run through the ivy MCP server, see docs/mcp.md:
+#   ivy run examples/browser/hacker-news.yml --bundles-dir connectors/browser/build/bundle
+name: hacker news
+vars:
+  pw_ws: ""
+  # absolute, so the files stay next to the suite whatever --output-dir the run uses
+  out: ${ivy.suite.workdir}/output
+  story: "tr.athing >> nth=2 >> .titleline > a"
+testcases:
+- name: open third item
+  steps:
+  - type: browser
+    name: open the 3rd story
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: https://news.ycombinator.com
+    - screenshot: ${out}/hacker-news-front-page.png
+    - text: ${story}
+      as: title
+    - attribute: {selector: "${story}", name: href}
+      as: href
+    - click: ${story}
+    - screenshot: ${out}/hacker-news-third-item.png
+    info: "3rd item: ${result.values.title} -> ${result.url}"
+    assertions:
+    # declared assertions replace the default one: keep the check that every action worked
+    - result.error == ""
+    - result.url != "https://news.ycombinator.com/"
+    set:
+      item: "{rank: 3, title: result.values.title, href: result.values.href, url: result.url, pageTitle: result.title, screenshots: result.screenshots}"
+  - name: save what was found
+    script: cat > "${out}/hacker-news.json"
+    stdin: ${toJson(item)}

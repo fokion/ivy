@@ -1,6 +1,5 @@
 package xyz.fokion.ivy.core.model;
 
-import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,20 +14,22 @@ public final class TestStepResult {
     public List<Failure> errors;
     public List<Skipped> skipped;
     public Status status;
-    /** The raw step as YAML. */
-    public byte[] raw;
-    /** The interpolated step as YAML. */
-    public byte[] interpolated;
+    /** The step as written, as YAML. */
+    public String raw = "";
+    /** The step once its templates are rendered, as YAML. */
+    public String interpolated = "";
     public int number;
     public int rangedIndex;
     public boolean rangedEnable;
-    public Map<String, String> inputVars;
+    /** The variables of the test case when the step ran. */
+    public Map<String, Object> inputVars;
+    /** {@code result} and the values the step set. */
     public Map<String, Object> computedVars = new LinkedHashMap<>();
     public List<String> computedInfo;
     public AssertionsApplied assertionsApplied = new AssertionsApplied();
     public int retries;
-    public String systemout = "";
-    public String systemerr = "";
+    public String stdout = "";
+    public String stderr = "";
     public double duration;
     public OffsetDateTime start;
     public OffsetDateTime end;
@@ -83,15 +84,11 @@ public final class TestStepResult {
         m.put("computedInfos", computedInfo);
         m.put("assertionsApplied", assertionsApplied.toJson());
         m.put("retries", retries);
-        m.put("systemout", systemout);
-        m.put("systemerr", systemerr);
+        m.put("stdout", stdout);
+        m.put("stderr", stderr);
         m.put("duration", duration);
         m.put("start", Json.time(start));
         m.put("end", Json.time(end));
         return m;
-    }
-
-    static byte[] bytes(String s) {
-        return s == null ? null : s.getBytes(StandardCharsets.UTF_8);
     }
 }

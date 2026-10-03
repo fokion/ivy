@@ -1,0 +1,10 @@
+executor: greet_twice
+input:
+  name: twice
+steps:
+- type: greet
+  name: ${input.name}
+  set:
+    first: result.message
+output:
+  both: ${first} ${first}

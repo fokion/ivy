@@ -1,11 +1,12 @@
 package xyz.fokion.ivy.core.engine;
 
+import java.util.List;
+import java.util.Map;
+
 /**
- * An executor written in YAML: a file in a lib directory with {@code executor}, {@code input},
- * {@code steps} and {@code output}.
- *
- * @param rawInputs the text of the {@code input} section
- * @param raw the whole file
+ * An executor written in YAML: a file in a lib directory with {@code executor}, {@code input}
+ * (the inputs and their defaults), {@code steps} and {@code output}.
  */
-record UserExecutor(String executor, String rawInputs, String raw, String filename) {
+record UserExecutor(String executor, Map<String, Object> input, List<Map<String, Object>> steps, Object output,
+        String filename) {
 }

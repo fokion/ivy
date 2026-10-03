@@ -1,0 +1,56 @@
+name: couchbase
+testcases:
+- name: key value
+  steps:
+  - type: couchbase
+    dsn: ${cb_dsn}
+    username: ${cb_user}
+    password: ${cb_password}
+    bucket: ivy
+    actions:
+    - type: upsert
+      entries:
+        airline_01:
+          id: 1
+          type: airline
+          name: first airline
+    - type: insert
+      entries:
+        airline_01: {id: 99}
+        airline_02: {id: 2, type: airline, name: second}
+    - type: replace
+      entries:
+        airline_02: {id: 2, type: airline, name: second, country: Latveria}
+        missing: {id: 0}
+    - type: get
+      with_expiry: true
+      ids: [airline_02, nope]
+    - type: exists
+      ids: [airline_01]
+    - type: touch
+      expiry: 600
+      ids: [airline_01]
+    - type: delete
+      ids: [airline_01, nope]
+    - type: upsert
+      transcoder: rawstring
+      entries:
+        greeting: hello
+    - type: get
+      transcoder: rawstring
+      ids: [greeting]
+    assertions:
+    - result.actions[0].airline_01.upserted == true
+    - result.actions[1].airline_01.inserted == false
+    - result.actions[1].airline_02.inserted == true
+    - result.actions[2].airline_02.replaced == true
+    - result.actions[2].missing.replaced == false
+    - result.actions[3].airline_02.found == true
+    - result.actions[3].airline_02.data.country == "Latveria"
+    - result.actions[3].airline_02.expiry == 0
+    - result.actions[3].nope.found == false
+    - result.actions[4].airline_01.found == true
+    - result.actions[5].airline_01.touched == true
+    - result.actions[6].airline_01.deleted == true
+    - result.actions[6].nope.deleted == false
+    - result.actions[8].greeting.data == "hello"

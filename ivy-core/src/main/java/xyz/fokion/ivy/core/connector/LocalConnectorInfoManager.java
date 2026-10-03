@@ -64,8 +64,18 @@ public final class LocalConnectorInfoManager implements ConnectorInfoManager {
             ds.forEach(jars::add);
         }
         jars.sort(Comparator.naturalOrder());
-        for (Path jar : jars) {
-            m.addBundle(jar);
+        try {
+            for (Path jar : jars) {
+                m.addBundle(jar);
+            }
+        } catch (IOException | RuntimeException e) {
+            // release the class loaders and extracted jars of the bundles loaded so far
+            try {
+                m.close();
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
         }
         return m;
     }
@@ -122,7 +132,7 @@ public final class LocalConnectorInfoManager implements ConnectorInfoManager {
     @SuppressWarnings("unchecked")
     private void register(String bundleName, String bundleVersion, ClassLoader loader) {
         ServiceLoader.load(Connector.class, loader).stream().forEach(provider -> {
-            Class<? extends Connector<?>> type = (Class<? extends Connector<?>>) (Class<?>) provider.type();
+            Class<? extends Connector<?>> type = (Class<? extends Connector<?>>) provider.type();
             LocalConnectorFacade facade = new LocalConnectorFacade(bundleName, bundleVersion, type);
             ConnectorFacade existing = facades.putIfAbsent(facade.info().type(), facade);
             if (existing != null && existing != facade) {
@@ -144,13 +154,52 @@ public final class LocalConnectorInfoManager implements ConnectorInfoManager {
 
     @Override
     public void close() throws IOException {
+        IOException exception = null;
         for (BundleClassLoader l : loaders) {
-            l.close();
-        }
-        for (Path dir : tempDirs) {
-            try (Stream<Path> files = Files.walk(dir)) {
-                files.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            try {
+                l.close();
+            } catch (IOException | RuntimeException e) {
+                if (exception == null) {
+                    exception = (e instanceof IOException ioe) ? ioe : new IOException(e);
+                } else {
+                    exception.addSuppressed(e);
+                }
             }
+        }
+        loaders.clear();
+
+        for (Path dir : tempDirs) {
+            if (!Files.exists(dir)) {
+                continue;
+            }
+            try {
+                List<Path> paths;
+                try (Stream<Path> files = Files.walk(dir)) {
+                    paths = files.sorted(Comparator.reverseOrder()).toList();
+                }
+                for (Path p : paths) {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException | RuntimeException e) {
+                        if (exception == null) {
+                            exception = (e instanceof IOException ioe) ? ioe : new IOException(e);
+                        } else {
+                            exception.addSuppressed(e);
+                        }
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                if (exception == null) {
+                    exception = (e instanceof IOException ioe) ? ioe : new IOException(e);
+                } else {
+                    exception.addSuppressed(e);
+                }
+            }
+        }
+        tempDirs.clear();
+
+        if (exception != null) {
+            throw exception;
         }
     }
 }

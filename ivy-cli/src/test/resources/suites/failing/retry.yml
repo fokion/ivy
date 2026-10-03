@@ -1,0 +1,15 @@
+name: retry
+testcases:
+- name: exhausted
+  steps:
+  - script: echo nope
+    retry: 2
+    assertions:
+    - result.stdout == "yes"
+- name: retry if
+  steps:
+  - script: echo fatal
+    retry: 5
+    retryIf: result.stdout == "temporary"
+    assertions:
+    - result.stdout == "ok"

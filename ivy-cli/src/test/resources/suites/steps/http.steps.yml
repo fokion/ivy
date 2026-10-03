@@ -1,0 +1,7 @@
+steps:
+  - expression: 'I GET {string}'
+    step: { type: http, url: "${http_url}${arg1}" }
+  - match: 'the status is (?<status>\d+)'
+    assertions: [ "result.status == status" ]
+  - expression: 'the JSON field {string} is {string}'
+    assertions: [ "result.body[arg1] == arg2" ]

@@ -7,6 +7,6 @@ import java.util.List;
  */
 public interface DefaultAssertionsProvider {
 
-    /** Assertions as strings, or maps for logical operators ({@code and}, {@code or}...). */
+    /** Assertions: expressions such as {@code result.status == 200}, or {@code {must: expression}} maps. */
     List<Object> defaultAssertions();
 }

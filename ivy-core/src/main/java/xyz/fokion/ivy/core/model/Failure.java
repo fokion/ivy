@@ -13,12 +13,12 @@ public final class Failure {
     public int testcaseLineNumber;
     public int stepNumber;
     public String assertion = "";
+    /** The assertion as declared in the step (a string or a map), or null. */
+    public Object declared;
     public boolean assertionRequired;
     public String error = "";
     public String value = "";
 
-    public Failure() {
-    }
 
     public Failure(String value) {
         this.value = value;

@@ -1,0 +1,14 @@
+// The browser connector: drives Chromium, Firefox or WebKit with Playwright.
+dependencies {
+    // the Java client and its Node driver for every platform; browsers are installed apart
+    bundled "com.microsoft.playwright:playwright:${playwrightVersion}"
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'playwright.version', playwrightVersion
+}
+
+// unit tests see no installed browser, whatever this machine has
+tasks.named('test') {
+    environment 'PLAYWRIGHT_BROWSERS_PATH', layout.buildDirectory.dir('no-browsers').get().asFile.absolutePath
+}

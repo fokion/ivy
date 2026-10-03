@@ -19,41 +19,43 @@ import xyz.fokion.ivy.spi.Connector;
 import xyz.fokion.ivy.spi.DefaultAssertionsProvider;
 import xyz.fokion.ivy.spi.StepContext;
 import xyz.fokion.ivy.spi.Struct;
-import xyz.fokion.ivy.spi.ZeroValueResultProvider;
-import xyz.fokion.ivy.spi.util.Json;
+import xyz.fokion.ivy.spi.util.LazyJson;
 
 /**
- * Runs a command or a script, port of venom's {@code exec} executor.
+ * Runs a command or a script.
  * <p>
- * Result: {@code systemout}, {@code systemoutjson}, {@code systemerr}, {@code systemerrjson},
- * {@code err}, {@code code} (a string) and {@code timeseconds}.
+ * Result: {@code stdout}, {@code stderr}, {@code exitCode}, {@code json} (stdout parsed when it
+ * is a JSON document, else null), {@code durationMs} and {@code error}.
  */
 @ConnectorClass(type = "exec", configurationClass = ExecConfiguration.class)
-public final class ExecConnector implements Connector<ExecConfiguration>, DefaultAssertionsProvider,
-        ZeroValueResultProvider {
+public final class ExecConnector implements Connector<ExecConfiguration>, DefaultAssertionsProvider {
+
+    @Override
+    public java.util.Map<String, String> resultFields() {
+        return Connector.fields(
+                "stdout", "the standard output, trailing newline removed",
+                "stderr", "the standard error",
+                "exitCode", "the exit code of the process",
+                "json", "stdout parsed as JSON, when it is JSON",
+                "durationMs", "the duration in milliseconds",
+                "error", "why the process could not run, empty otherwise");
+    }
 
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
 
     @Override
     public List<Object> defaultAssertions() {
-        return List.of("result.code ShouldEqual 0");
+        return List.of("result.exitCode == 0");
     }
 
-    @Override
-    public Object zeroValueResult() {
-        return result("", null, "", null, "", "", 0);
-    }
-
-    private static Struct result(String out, Object outJson, String err, Object errJson, String error, String code,
-            double seconds) {
+    private static Struct result(String out, String err, String error, long exitCode, long durationMs) {
         return Struct.builder("Result")
-                .put("systemout", out)
-                .put("systemoutjson", outJson)
-                .put("systemerr", err)
-                .put("systemerrjson", errJson)
-                .put("err", error)
-                .put("code", code)
-                .put("timeseconds", seconds)
+                .put("stdout", out)
+                .put("stderr", err)
+                .put("exitCode", exitCode)
+                .put("json", LazyJson.of(out))
+                .put("durationMs", durationMs)
+                .put("error", error)
                 .build();
     }
 
@@ -99,16 +101,13 @@ public final class ExecConnector implements Connector<ExecConfiguration>, Defaul
         long start = System.nanoTime();
         context.log(StepContext.Level.DEBUG, "teststep exec '" + String.join(" ", command) + "'");
         ProcessBuilder pb = new ProcessBuilder(command);
-        String workdir = context.var("venom.testsuite.workdir");
-        if (workdir != null && !workdir.isEmpty()) {
-            pb.directory(Path.of(workdir).toFile());
-        }
+        pb.directory(context.workdir().toFile());
         Process process;
         try {
             process = pb.start();
         } catch (IOException e) {
             context.log(StepContext.Level.DEBUG, "error on cmd.Start: " + e.getMessage());
-            return result("", null, "", null, e.getMessage(), "127", 0);
+            return result("", "", e.getMessage(), 127, 0);
         }
         CompletableFuture<String> out = drain(process.getInputStream());
         CompletableFuture<String> err = drain(process.getErrorStream());
@@ -127,14 +126,12 @@ public final class ExecConnector implements Connector<ExecConfiguration>, Defaul
             process.destroyForcibly();
             throw e;
         }
-        String systemout = GoStrings.removeNotPrintable(stripTrailing(out.join(), "\n"));
-        String systemerr = GoStrings.removeNotPrintable(stripTrailing(err.join(), "\n"));
-        if (!systemerr.isEmpty()) {
-            context.log(StepContext.Level.DEBUG, systemerr);
+        String stdout = GoStrings.removeNotPrintable(stripTrailing(out.join(), "\n"));
+        String stderr = GoStrings.removeNotPrintable(stripTrailing(err.join(), "\n"));
+        if (!stderr.isEmpty()) {
+            context.log(StepContext.Level.DEBUG, stderr);
         }
-        double seconds = (System.nanoTime() - start) / 1e9;
-        return result(systemout, Json.tryParse(systemout), systemerr, Json.tryParse(systemerr), "",
-                Integer.toString(code), seconds);
+        return result(stdout, stderr, "", code, (System.nanoTime() - start) / 1_000_000);
     }
 
     private static CompletableFuture<String> drain(InputStream in) {

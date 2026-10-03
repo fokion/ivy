@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Dark mode follows the system, unless the page is given data-theme="light" or "dark". */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  details > summary {
+    list-style: none;
+  }
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary .chevron {
+  transition: transform 150ms ease;
+}
+
+details[open] > summary .chevron {
+  transform: rotate(90deg);
+}

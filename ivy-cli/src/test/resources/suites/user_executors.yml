@@ -1,0 +1,23 @@
+name: user executors
+testcases:
+- name: inputs and defaults
+  steps:
+  - type: greet
+    assertions:
+    - result.message == "hello world"
+  - type: greet
+    name: ivy
+    assertions:
+    - result.message == "hello ivy"
+- name: typed outputs
+  steps:
+  - type: list_people
+    assertions:
+    - result.people.length == 2
+    - result.people[1].name == "b"
+- name: nested
+  steps:
+  - type: greet_twice
+    name: z
+    assertions:
+    - result.both == "hello z hello z"

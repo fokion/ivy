@@ -1,0 +1,25 @@
+name: sqlite
+testcases:
+- name: migrations and fixtures
+  steps:
+  - type: dbfixtures
+    database: sqlite
+    dsn: test.db
+    migrations: migrations
+    files: [fixtures/players.yml, fixtures/cards.yml]
+    assertions:
+    - result.migrations contains "001_tables.sql"
+    - result.rows == 4
+  - type: dbfixtures
+    database: sqlite
+    dsn: test.db
+    migrations: migrations
+    folder: fixtures
+    assertions:
+    - isEmpty(result.migrations)
+  - type: sql
+    driver: sqlite
+    dsn: test.db
+    commands: ["SELECT count(*) AS n FROM cards"]
+    assertions:
+    - result.queries[0].rows[0].n == 2

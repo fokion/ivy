@@ -1,0 +1,10 @@
+name: must
+testcases:
+- name: required
+  steps:
+  - name: must1
+    script: echo a
+    assertions:
+    - must: result.stdout == "b"
+  - name: never
+    script: echo b

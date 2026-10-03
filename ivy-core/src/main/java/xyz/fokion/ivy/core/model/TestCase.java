@@ -7,16 +7,17 @@ import java.util.List;
 import java.util.Map;
 
 import xyz.fokion.ivy.core.yaml.Yaml.TestCaseLines;
-import xyz.fokion.ivy.spi.util.Json;
 
 /** A test case as read from the suite, with its results once run. */
 public final class TestCase {
     // input
     public String name = "";
+    /** The declared variables; once run, their values. */
     public Map<String, Object> vars = new LinkedHashMap<>();
-    public List<String> skip = new ArrayList<>();
-    /** Steps as compact JSON, interpolated just before they run. */
-    public List<String> rawTestSteps = new ArrayList<>();
+    /** {@code if}: an expression; the test case runs when it is true. */
+    public String condition = "";
+    /** The steps as parsed from YAML; their templates are rendered just before each one runs. */
+    public List<Map<String, Object>> steps = new ArrayList<>();
     public String id = "";
 
     // computed
@@ -28,12 +29,14 @@ public final class TestCase {
     public OffsetDateTime start;
     public OffsetDateTime end;
     public final List<TestStepResult> testStepResults = new ArrayList<>();
-    public Map<String, Object> testSuiteVars = new LinkedHashMap<>();
+    /** The values set by the steps ({@code set:}). */
     public Map<String, Object> computedVars = new LinkedHashMap<>();
     public final List<String> computedVerbose = new ArrayList<>();
     public boolean isExecutor;
     public boolean isEvaluated;
     public TestCaseLines lines = TestCaseLines.EMPTY;
+    /** The Gherkin scenario this test case was built from, or null. */
+    public GherkinInfo.Scenario gherkin;
 
     public void addSkipped(String value) {
         if (skipped == null) {
@@ -66,12 +69,11 @@ public final class TestCase {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", name);
         m.put("vars", vars);
-        m.put("skip", skip);
-        List<Object> steps = new ArrayList<>();
-        for (String raw : rawTestSteps) {
-            steps.add(Json.parse(raw));
+        if (!condition.isEmpty()) {
+            m.put("if", condition);
         }
         m.put("steps", steps);
+        m.put("set", computedVars);
         m.put("id", id);
         m.put("skipped", xyz.fokion.ivy.core.model.Json.list(skipped, Skipped::toJson));
         m.put("status", Status.name(status));
@@ -81,6 +83,9 @@ public final class TestCase {
         List<Object> results = new ArrayList<>();
         testStepResults.forEach(r -> results.add(r.toJson()));
         m.put("results", results);
+        if (gherkin != null) {
+            m.put("gherkin", gherkin.toJson());
+        }
         return m;
     }
 }

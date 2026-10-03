@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldNotContainKey
-  steps:
-  - script: echo '{"foo":"bar"}'
-    assertions:
-    - result.systemoutjson ShouldNotContainKey foo2

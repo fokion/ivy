@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><title>Login</title></head>
+<body>
+<h1>Login</h1>
+<form onsubmit="location.href = '/home.html?user=' + encodeURIComponent(document.getElementById('user').value); return false;">
+  <input id="user"> <input id="password" type="password">
+  <button type="submit">Sign in</button>
+</form>
+</body></html>

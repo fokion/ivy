@@ -1,6 +1,8 @@
 package xyz.fokion.ivy.spi.util;
 
 import java.math.BigDecimal;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigInteger;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
@@ -9,6 +11,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import xyz.fokion.ivy.spi.Struct;
 
@@ -30,9 +33,21 @@ public final class Json {
     private Json() {
     }
 
-    public record Options(String indent, boolean sortKeys, boolean escapeHtml) {
+    /**
+     * @param maxString strings longer than this are cut, with a marker telling how much was left
+     *        out; 0 keeps them whole
+     */
+    public record Options(String indent, boolean sortKeys, boolean escapeHtml, int maxString) {
+        public Options(String indent, boolean sortKeys, boolean escapeHtml) {
+            this(indent, sortKeys, escapeHtml, 0);
+        }
+
         public Options withIndent(String indent) {
-            return new Options(indent, sortKeys, escapeHtml);
+            return new Options(indent, sortKeys, escapeHtml, maxString);
+        }
+
+        public Options withMaxString(int max) {
+            return new Options(indent, sortKeys, escapeHtml, max);
         }
     }
 
@@ -42,8 +57,16 @@ public final class Json {
 
     public static String write(Object value, Options options) {
         StringBuilder sb = new StringBuilder();
-        new Writer(sb, options).value(value, 0);
+        new Writer(sb, options, UnaryOperator.identity()).value(value, 0);
         return sb.toString();
+    }
+
+    /**
+     * Streams a value to {@code out}, without building the document in memory; {@code strings}
+     * rewrites every string before it is written (to hide secrets, for instance).
+     */
+    public static void write(Object value, Options options, Appendable out, UnaryOperator<String> strings) {
+        new Writer(out, options, strings).value(value, 0);
     }
 
     public static Object parse(String json) {
@@ -114,91 +137,119 @@ public final class Json {
         sb.append('"');
     }
 
-    private record Writer(StringBuilder sb, Options options) {
+    private record Writer(Appendable out, Options options, UnaryOperator<String> strings) {
+
+        private void append(CharSequence s) {
+            try {
+                out.append(s);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        private void append(char c) {
+            try {
+                out.append(c);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        private void string(String s, boolean escapeHtml) {
+            String v = strings.apply(s);
+            int max = options.maxString();
+            if (max > 0 && v.length() > max) {
+                v = v.substring(0, max) + "… " + (v.length() - max) + " more characters";
+            }
+            StringBuilder sb = new StringBuilder(v.length() + 2);
+            appendString(sb, v, escapeHtml);
+            append(sb);
+        }
 
         void value(Object v, int depth) {
             switch (v) {
-                case null -> sb.append("null");
-                case String s -> appendString(sb, s, options.escapeHtml());
-                case Character c -> appendString(sb, c.toString(), options.escapeHtml());
-                case Boolean b -> sb.append(b);
-                case Double d -> sb.append(GoFormat.formatFloatJson(d));
-                case Float f -> sb.append(GoFormat.formatFloatJson(f.doubleValue()));
-                case BigDecimal bd -> sb.append(bd.toPlainString());
-                case BigInteger bi -> sb.append(bi);
-                case Number n -> sb.append(n.longValue());
-                case byte[] bytes -> appendString(sb, Base64.getEncoder().encodeToString(bytes), false);
+                case null -> append("null");
+                case String s -> string(s, options.escapeHtml());
+                case Character c -> string(c.toString(), options.escapeHtml());
+                case Boolean b -> append(b.toString());
+                case Double d -> append(GoFormat.formatFloatJson(d));
+                case Float f -> append(GoFormat.formatFloatJson(f.doubleValue()));
+                case BigDecimal bd -> append(bd.toPlainString());
+                case BigInteger bi -> append(bi.toString());
+                case Number n -> append(Long.toString(n.longValue()));
+                case byte[] bytes -> string(Base64.getEncoder().encodeToString(bytes), false);
+                case LazyJson j -> value(j.value(), depth);
                 case Struct s -> object(s.fields(), false, depth);
                 case Map<?, ?> m -> object(m, options.sortKeys(), depth);
                 case Collection<?> c -> array(c, depth);
-                case Object[] a -> array(List.of(a), depth);
-                case TemporalAccessor t -> appendString(sb, t.toString(), false);
-                default -> appendString(sb, v.toString(), options.escapeHtml());
+                case Object[] a -> array(java.util.Arrays.asList(a), depth);
+                case TemporalAccessor t -> string(t.toString(), false);
+                default -> string(v.toString(), options.escapeHtml());
             }
         }
 
         private void object(Map<?, ?> m, boolean sort, int depth) {
             if (m.isEmpty()) {
-                sb.append("{}");
+                append("{}");
                 return;
             }
-            Map<String, Object> entries;
-            if (sort) {
-                entries = GoFormat.sortedEntries(m);
-            } else {
-                entries = new LinkedHashMap<>();
-                m.forEach((k, val) -> entries.put(String.valueOf(k), val));
-            }
-            sb.append('{');
+            Iterable<? extends Map.Entry<?, ?>> entries = sort ? GoFormat.sortedEntries(m).entrySet() : m.entrySet();
+            append('{');
             boolean first = true;
-            for (Map.Entry<String, Object> e : entries.entrySet()) {
+            for (Map.Entry<?, ?> e : entries) {
                 if (!first) {
-                    sb.append(',');
+                    append(',');
                 }
                 first = false;
                 newline(depth + 1);
-                appendString(sb, e.getKey(), options.escapeHtml());
-                sb.append(':');
+                StringBuilder key = new StringBuilder();
+                appendString(key, String.valueOf(e.getKey()), options.escapeHtml());
+                append(key);
+                append(':');
                 if (!options.indent().isEmpty()) {
-                    sb.append(' ');
+                    append(' ');
                 }
                 value(e.getValue(), depth + 1);
             }
             newline(depth);
-            sb.append('}');
+            append('}');
         }
 
         private void array(Collection<?> c, int depth) {
             if (c.isEmpty()) {
-                sb.append("[]");
+                append("[]");
                 return;
             }
-            sb.append('[');
+            append('[');
             boolean first = true;
             for (Object e : c) {
                 if (!first) {
-                    sb.append(',');
+                    append(',');
                 }
                 first = false;
                 newline(depth + 1);
                 value(e, depth + 1);
             }
             newline(depth);
-            sb.append(']');
+            append(']');
         }
 
         private void newline(int depth) {
             if (options.indent().isEmpty()) {
                 return;
             }
-            sb.append('\n');
-            sb.append(options.indent().repeat(depth));
+            append('\n');
+            append(options.indent().repeat(depth));
         }
     }
+
+    /** Deeper documents are rejected rather than overflowing the stack. */
+    static final int MAX_DEPTH = 1000;
 
     private static final class Reader {
         private final String s;
         private int pos;
+        private int depth;
 
         Reader(String s) {
             this.s = s;
@@ -225,8 +276,14 @@ public final class Json {
             }
             char c = s.charAt(pos);
             return switch (c) {
-                case '{' -> object();
-                case '[' -> array();
+                case '{', '[' -> {
+                    if (++depth > MAX_DEPTH) {
+                        throw error("exceeded max depth");
+                    }
+                    Object v = c == '{' ? object() : array();
+                    depth--;
+                    yield v;
+                }
                 case '"' -> string();
                 case 't' -> literal("true", Boolean.TRUE);
                 case 'f' -> literal("false", Boolean.FALSE);
@@ -337,20 +394,44 @@ public final class Json {
                     case 'r' -> sb.append('\r');
                     case 't' -> sb.append('\t');
                     case 'u' -> {
-                        if (pos + 4 > s.length()) {
-                            throw error("invalid unicode escape");
+                        int cp = hex4();
+                        if (Character.isHighSurrogate((char) cp) && s.startsWith("\\u", pos)) {
+                            int save = pos;
+                            pos += 2;
+                            int low = hex4();
+                            if (Character.isLowSurrogate((char) low)) {
+                                sb.append((char) cp).append((char) low);
+                                continue;
+                            }
+                            pos = save;
                         }
-                        try {
-                            sb.append((char) Integer.parseInt(s.substring(pos, pos + 4), 16));
-                        } catch (NumberFormatException ex) {
-                            throw error("invalid unicode escape");
-                        }
-                        pos += 4;
+                        // a lone surrogate becomes U+FFFD, as in Go
+                        sb.append(Character.isSurrogate((char) cp) ? '\uFFFD' : (char) cp);
                     }
                     default -> throw error("invalid escape in string literal");
                 }
             }
         }
+
+        private int hex4() {
+            if (pos + 4 > s.length()) {
+                throw error("invalid unicode escape");
+            }
+            int v = 0;
+            for (int i = 0; i < 4; i++) {
+                int d = Character.digit(s.charAt(pos + i), 16);
+                if (d < 0) {
+                    throw error("invalid unicode escape");
+                }
+                v = v * 16 + d;
+            }
+            pos += 4;
+            return v;
+        }
+
+        /** The JSON number grammar: -?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)? */
+        private static final java.util.regex.Pattern NUMBER =
+                java.util.regex.Pattern.compile("-?(0|[1-9]\\d*)(\\.\\d+)?([eE][+-]?\\d+)?");
 
         private Object number() {
             int start = pos;
@@ -371,11 +452,7 @@ public final class Json {
                 }
             }
             String text = s.substring(start, pos);
-            if (pos == digitsStart) {
-                throw error("invalid number");
-            }
-            if (text.length() > 1 + (text.startsWith("-") ? 1 : 0)
-                    && s.charAt(digitsStart) == '0' && Character.isDigit(s.charAt(digitsStart + 1))) {
+            if (pos == digitsStart || !NUMBER.matcher(text).matches()) {
                 throw error("invalid number " + text);
             }
             try {
@@ -383,7 +460,11 @@ public final class Json {
                     BigInteger bi = new BigInteger(text);
                     return bi.bitLength() < 64 ? (Object) bi.longValue() : bi.doubleValue();
                 }
-                return Double.parseDouble(text);
+                double d = Double.parseDouble(text);
+                if (Double.isInfinite(d)) {
+                    throw error("number " + text + " out of range");
+                }
+                return d;
             } catch (NumberFormatException ex) {
                 throw error("invalid number " + text);
             }

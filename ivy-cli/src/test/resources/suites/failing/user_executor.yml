@@ -1,0 +1,5 @@
+name: user executor
+testcases:
+- name: failing inner step
+  steps:
+  - type: broken

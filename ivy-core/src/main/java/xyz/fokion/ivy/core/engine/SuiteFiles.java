@@ -27,19 +27,27 @@ public final class SuiteFiles {
         for (String raw : paths) {
             String p = raw.strip();
             if (Files.isDirectory(Path.of(p))) {
-                p = p + "/*.y*ml";
+                p = p + "/*.{yml,yaml,feature}";
             }
             for (Path f : glob(p)) {
-                String name = f.getFileName().toString();
-                if (name.endsWith(".yml") || name.endsWith(".yaml")) {
+                if (isSuite(f)) {
                     files.add(f);
                 }
             }
         }
         if (files.isEmpty()) {
-            throw new IvyException("no YAML (*.yml or *.yaml) file found or defined");
+            throw new IvyException("no suite (*.yml, *.yaml or *.feature) file found or defined");
         }
         return new ArrayList<>(files);
+    }
+
+    static boolean isSuite(Path f) {
+        String name = f.getFileName().toString();
+        return name.endsWith(".yml") || name.endsWith(".yaml") || isFeature(f);
+    }
+
+    static boolean isFeature(Path f) {
+        return f.getFileName().toString().endsWith(".feature");
     }
 
     public static List<Path> glob(String pattern) throws IvyException {
@@ -58,7 +66,7 @@ public final class SuiteFiles {
         for (; i < segments.length - 1 && !hasMeta(segments[i]); i++) {
             base.append(segments[i]).append('/');
         }
-        String baseDir = base.length() == 0 ? "" : base.toString();
+        String baseDir = base.isEmpty() ? "" : base.toString();
         Path root = baseDir.isEmpty() ? Path.of(".") : Path.of(baseDir);
         Pattern regex = Pattern.compile(toRegex(normalized));
         List<Path> out = new ArrayList<>();
@@ -73,7 +81,7 @@ public final class SuiteFiles {
                     out.add(Path.of(candidate));
                 }
             });
-        } catch (IOException e) {
+        } catch (IOException | java.io.UncheckedIOException e) {
             throw new IvyException("error reading files on path \"" + pattern + "\": " + e.getMessage(), e);
         }
         if (out.isEmpty()) {

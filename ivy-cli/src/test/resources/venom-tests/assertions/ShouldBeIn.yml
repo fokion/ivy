@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-  - name: ShouldBeIn
-    steps:
-    - script: echo 1
-      assertions:
-      - result.systemoutjson ShouldBeIn 1 2

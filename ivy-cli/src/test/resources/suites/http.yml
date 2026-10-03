@@ -1,0 +1,53 @@
+# http_url points at a server started by the acceptance test
+name: http
+testcases:
+- name: get json
+  steps:
+  - type: http
+    method: GET
+    url: ${http_url}/json
+    headers:
+      X-Request: ivy
+    assertions:
+    - result.status == 200
+    - result.body.echo.header == "ivy"
+    - result.headers["content-type"].startsWith("application/json")
+    set:
+      token: result.body.token
+- name: post a previous value
+  steps:
+  - type: http
+    method: POST
+    url: ${http_url}/echo
+    headers:
+      Content-Type: application/json
+    body: '{"token":"${cases["get-json"].token}"}'
+    assertions:
+    - result.body.token == "abc"
+- name: query and basic auth
+  steps:
+  - type: http
+    url: ${http_url}/json
+    basic_auth_user: user
+    basic_auth_password: pass
+    query_parameters:
+      q: a b
+    assertions:
+    - result.body.echo.query == "q=a+b"
+    - result.body.echo.auth == "Basic dXNlcjpwYXNz"
+- name: redirects and status codes
+  steps:
+  - type: http
+    url: ${http_url}/redirect
+    assertions:
+    - result.status == 200
+    - result.body.token == "abc"
+  - type: http
+    url: ${http_url}/redirect
+    no_follow_redirect: true
+    assertions:
+    - result.status == 302
+  - type: http
+    url: ${http_url}/status/404
+    assertions:
+    - result.status == 404

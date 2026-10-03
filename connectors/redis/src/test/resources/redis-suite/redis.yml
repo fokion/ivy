@@ -1,0 +1,28 @@
+name: redis
+testcases:
+- name: commands
+  steps:
+  - type: redis
+    dialURL: ${redis_url}
+    commands:
+    - FLUSHALL
+    - SET foo "hello world"
+    - GET foo
+    - RPUSH list a b c
+    - LRANGE list 0 -1
+    - GET missing
+    - INCR counter
+    assertions:
+    - result.commands.length == 7
+    - result.commands[1].response == "OK"
+    - result.commands[2].response == "hello world"
+    - result.commands[4].response contains "b"
+    - result.commands[4].response.length == 3
+    - isEmpty(result.commands[5].response)
+    - result.commands[6].response == 1
+- name: from a file and a variable
+  steps:
+  - type: redis
+    path: commands.txt
+    assertions:
+    - result.commands[1].response == "line one"

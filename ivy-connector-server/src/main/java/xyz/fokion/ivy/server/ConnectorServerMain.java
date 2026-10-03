@@ -19,9 +19,9 @@ public final class ConnectorServerMain {
     private ConnectorServerMain() {
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    static void main(String[] args) throws IOException, InterruptedException {
         String bundles = "bundles";
-        String host = "0.0.0.0";
+        String host = "127.0.0.1";
         int port = 8759;
         String key = System.getenv().getOrDefault("IVY_CONNECTOR_KEY", "");
         boolean tls = false;
@@ -41,6 +41,9 @@ public final class ConnectorServerMain {
         if (key.isEmpty()) {
             System.err.println("a key is required: --key or IVY_CONNECTOR_KEY");
             System.exit(2);
+        }
+        if (!tls && !host.equals("127.0.0.1") && !host.equals("localhost") && !host.equals("::1")) {
+            System.err.println("warning: listening on " + host + " without --tls, the key travels in clear text");
         }
         LocalConnectorInfoManager connectors = LocalConnectorInfoManager.fromBundles(Path.of(bundles));
         ConnectorServer server = ConnectorServer.start(connectors, host, port, key, tls);

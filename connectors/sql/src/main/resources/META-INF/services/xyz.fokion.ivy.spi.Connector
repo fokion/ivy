@@ -1,1 +1,2 @@
 xyz.fokion.ivy.connectors.sql.SqlConnector
+xyz.fokion.ivy.connectors.sql.DbFixturesConnector

@@ -1,3 +1,7 @@
+plugins {
+    id 'com.diffplug.spotless' version '7.0.2'
+}
+
 allprojects {
     group = 'xyz.fokion'
     version = '0.0.1'
@@ -5,6 +9,22 @@ allprojects {
     repositories {
         mavenCentral()
         mavenLocal()
+    }
+
+    apply plugin: 'com.diffplug.spotless'
+
+    spotless {
+        java {
+            target 'src/*/java/**/*.java'
+            removeUnusedImports()
+            trimTrailingWhitespace()
+            endWithNewline()
+        }
+        groovyGradle {
+            target '*.gradle'
+            trimTrailingWhitespace()
+            endWithNewline()
+        }
     }
 }
 
@@ -45,6 +65,29 @@ configure(subprojects.findAll { it.path.startsWith(':connectors:') }) {
     dependencies {
         compileOnly project(':ivy-api')
         testImplementation project(':ivy-api')
+        // integration tests run suites through the engine against Testcontainers services
+        testImplementation testFixtures(project(':ivy-core'))
+        testImplementation platform("org.testcontainers:testcontainers-bom:${testcontainersVersion}")
+        testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+        testRuntimeOnly "org.slf4j:slf4j-simple:${slf4jVersion}"
+    }
+
+    // tests tagged "integration" need Docker: ./gradlew integrationTest
+    tasks.named('test') {
+        useJUnitPlatform {
+            excludeTags 'integration'
+        }
+    }
+
+    tasks.register('integrationTest', Test) {
+        group = 'verification'
+        description = 'Runs the connector against real services started with Testcontainers'
+        testClassesDirs = sourceSets.test.output.classesDirs
+        classpath = sourceSets.test.runtimeClasspath
+        useJUnitPlatform {
+            includeTags 'integration'
+        }
+        shouldRunAfter 'test'
     }
 
     tasks.register('bundle', Jar) {
@@ -67,4 +110,47 @@ configure(subprojects.findAll { it.path.startsWith(':connectors:') }) {
     tasks.named('assemble') {
         dependsOn 'bundle'
     }
+}
+
+// The HTML report (ivy-report/, Vite + Tailwind) is built with Node and committed into ivy-core,
+// so the Java build needs no Node. Run after changing ivy-report: ./gradlew ivyReport
+def reportDir = file('ivy-report')
+
+tasks.register('ivyReportBuild', Exec) {
+    group = 'build'
+    description = 'Builds ivy-report with npm'
+    workingDir reportDir
+    commandLine 'sh', '-c', 'npm ci --no-audit --no-fund && npm run check && npm test && npm run build'
+}
+
+tasks.register('ivyReport', Copy) {
+    group = 'build'
+    description = 'Builds the HTML report and copies it into ivy-core'
+    dependsOn 'ivyReportBuild'
+    from(new File(reportDir, 'dist/index.html'))
+    into 'ivy-core/src/main/resources/xyz/fokion/ivy/core/output'
+    rename { 'report.html' }
+}
+
+tasks.register('installGitHooks', Copy) {
+    group = 'verification'
+    description = 'Installs git hooks into .git/hooks'
+    from file('.githooks')
+    into file('.git/hooks')
+    filePermissions {
+        user {
+            read = true
+            write = true
+            execute = true
+        }
+        group {
+            read = true
+            execute = true
+        }
+        other {
+            read = true
+            execute = true
+        }
+    }
+    onlyIf { file('.git').exists() }
 }

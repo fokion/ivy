@@ -1,0 +1,15 @@
+steps:
+  - expression: a working directory
+    step: { script: pwd }
+  - expression: 'I run {string}'
+    step: { script: "${arg1}" }
+  - expression: 'I run the script:'
+    step: { script: "${docstring}" }
+  - expression: 'the exit code is {int}'
+    assertions: [ "result.exitCode == arg1" ]
+  - expression: 'the output is {string}'
+    assertions: [ "result.stdout == arg1" ]
+  - expression: 'the output contains {string}'
+    assertions: [ "result.stdout contains arg1" ]
+  - expression: 'the output lists:'
+    step: { script: "printf '%s\\n' '${toJson(rows)}'" }

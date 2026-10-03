@@ -10,7 +10,6 @@ import xyz.fokion.ivy.spi.ConnectorClass;
 import xyz.fokion.ivy.spi.ConnectorException;
 import xyz.fokion.ivy.spi.DefaultAssertionsProvider;
 import xyz.fokion.ivy.spi.StepContext;
-import xyz.fokion.ivy.spi.ZeroValueResultProvider;
 
 /**
  * Runs a connector class loaded in this JVM, from the classpath or from a bundle.
@@ -31,15 +30,26 @@ public final class LocalConnectorFacade implements ConnectorFacade {
         Connector<?> probe = newInstance();
         List<Object> defaultAssertions = probe instanceof DefaultAssertionsProvider p
                 ? new ArrayList<>(p.defaultAssertions()) : null;
-        Object zeroValue = probe instanceof ZeroValueResultProvider p ? p.zeroValueResult() : null;
+        java.util.Map<String, String> resultFields = probe.resultFields();
+        try {
+            // the probe was never opened, closing it releases anything its constructor allocated
+            probe.close();
+        } catch (Exception ignored) {
+            // describing the connector succeeded, a failing close changes nothing
+        }
         String displayName = annotation.displayName().isEmpty() ? annotation.type() : annotation.displayName();
         this.info = new ConnectorInfo(new ConnectorKey(bundleName, bundleVersion, annotation.type()), displayName,
-                ConfigurationBinder.describe(configurationClass), defaultAssertions, zeroValue);
+                ConfigurationBinder.describe(configurationClass), defaultAssertions, resultFields);
     }
 
     @Override
     public ConnectorInfo info() {
         return info;
+    }
+
+    /** The class loader of the connector: its bundle's, for classes the bundle offers besides it. */
+    public ClassLoader classLoader() {
+        return connectorClass.getClassLoader();
     }
 
     private Connector<?> newInstance() {
@@ -55,10 +65,19 @@ public final class LocalConnectorFacade implements ConnectorFacade {
     public Session openSession(StepContext context) throws Exception {
         Connector<?> connector = newInstance();
         ClassLoader loader = connectorClass.getClassLoader();
-        withContextLoader(loader, () -> {
-            connector.open(context);
-            return null;
-        });
+        try {
+            withContextLoader(loader, () -> {
+                connector.open(context);
+                return null;
+            });
+        } catch (Exception e) {
+            try {
+                connector.close();
+            } catch (Exception suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
+        }
         return new Session() {
             @Override
             @SuppressWarnings({"unchecked", "rawtypes"})

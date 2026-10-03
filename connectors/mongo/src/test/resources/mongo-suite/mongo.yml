@@ -1,0 +1,65 @@
+name: mongo
+vars:
+  db: cards
+testcases:
+- name: fixtures and queries
+  steps:
+  - type: mongo
+    uri: ${mongo}
+    database: ${db}
+    collection: cards
+    actions:
+    - type: loadFixtures
+      folder: fixtures
+    - type: count
+      filter: '{"suit": "clubs"}'
+    - type: find
+      filter:
+        suit: clubs
+      options:
+        sort: '{"value": -1}'
+        projection: '{"_id": 0, "value": 1}'
+    assertions:
+    - result.actions[1].count == 2
+    - result.actions[2].results.length == 2
+    - result.actions[2].results[0].value == "queen"
+    - "!('_id' in result.actions[2].results[0])"
+- name: writes
+  steps:
+  - type: mongo
+    uri: ${mongo}
+    database: ${db}
+    collection: cards
+    actions:
+    - type: insert
+      file: more-cards.jsonlist
+      documents:
+      - '{"_id": {"$oid": "5d505646cf6d4fe581014ab2"}, "suit": "diamonds", "value": "three"}'
+    - type: update
+      filter: '{"suit": {"$in": ["clubs", "spades"]}}'
+      update: '{"$set": {"color": "black"}}'
+    - type: delete
+      filter: '{"suit": "hearts"}'
+    - type: aggregate
+      pipeline:
+      - '{"$match": {"color": "black"}}'
+      - '{"$group": {"_id": "$suit", "count": {"$sum": 1}}}'
+      - '{"$sort": {"_id": 1}}'
+    - type: find
+      filter: '{"_id": {"$oid": "5d505646cf6d4fe581014ab2"}}'
+    assertions:
+    - result.actions[0].insertedIds.length == 3
+    - result.actions[1].matchedCount == 4
+    - result.actions[2].deletedCount == 1
+    - result.actions[3].results[1]._id == "spades"
+    - result.actions[3].results[1].count == 2
+    - result.actions[4].results[0]._id.$oid == "5d505646cf6d4fe581014ab2"
+- name: collections
+  steps:
+  - type: mongo
+    uri: ${mongo}
+    database: ${db}
+    collection: extra
+    actions:
+    - type: createCollection
+    - type: dropCollection

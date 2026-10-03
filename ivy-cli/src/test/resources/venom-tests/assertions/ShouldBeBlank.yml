@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldBeBlank
-  steps:
-  - script: echo ''
-    assertions:
-    - result.systemout ShouldBeBlank

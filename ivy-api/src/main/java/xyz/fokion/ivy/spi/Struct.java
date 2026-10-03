@@ -6,10 +6,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * A named record of fields, the equivalent of a Go struct in venom.
- * <p>
- * When a step returns a struct named {@code Result}, its fields become the {@code result.*}
- * variables. Field order is kept.
+ * A named record of fields: what a connector returns. Its fields are what steps read as
+ * {@code result.<field>}; field order is kept.
  */
 public final class Struct {
 

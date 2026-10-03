@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldNotBeEmpty
-  steps:
-  - script: echo '["foo", "bar", "foo2"]'
-    assertions:
-    - result.systemoutjson ShouldNotBeEmpty

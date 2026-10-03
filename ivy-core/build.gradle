@@ -1,5 +1,6 @@
 plugins {
     id 'java-library'
+    id 'java-test-fixtures'
 }
 
 dependencies {
@@ -12,4 +13,26 @@ processResources {
     filesMatching('xyz/fokion/ivy/core/version.properties') {
         expand(version: project.version)
     }
+}
+
+// tests tagged "perf" measure the engine: ./gradlew :ivy-core:perfTest
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'perf'
+    }
+}
+
+tasks.register('perfTest', Test) {
+    group = 'verification'
+    description = 'Measures parallel suites and memory use (100 suites of 10 test cases)'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'perf'
+    }
+    maxHeapSize = '256m'
+    testLogging {
+        showStandardStreams = true
+    }
+    shouldRunAfter 'test'
 }

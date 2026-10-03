@@ -1,0 +1,32 @@
+# Browser steps for the features of examples/browser. A scenario keeps one page from step to step.
+# Files go to examples/browser/output, whatever --output-dir the run uses.
+steps:
+  - expression: 'I open {string}'
+    step:
+      type: browser
+      actions:
+      - goto: ${arg1}
+  - expression: 'I take a screenshot {string}'
+    step:
+      type: browser
+      actions:
+      - screenshot: ${ivy.suite.workdir}/output/${arg1}
+  # the n-th story of the Hacker News front page: its title and link, then a click on it.
+  # The selector is inlined: a step's own 'with' would replace the one carrying arg1.
+  - expression: 'I open story {int}'
+    step:
+      type: browser
+      actions:
+      - text: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+        as: title
+      - attribute: {selector: "tr.athing >> nth=${arg1 - 1} >> .titleline > a", name: href}
+        as: href
+      - click: "tr.athing >> nth=${arg1 - 1} >> .titleline > a"
+      set:
+        story: "{rank: number(arg1), title: result.values.title, href: result.values.href, url: result.url, pageTitle: result.title}"
+  - expression: 'I am no longer on {string}'
+    assertions: [ "result.url != arg1" ]
+  - expression: 'I save the story to {string}'
+    step:
+      script: cat > "${ivy.suite.workdir}/output/${arg1}"
+      stdin: ${toJson(story)}

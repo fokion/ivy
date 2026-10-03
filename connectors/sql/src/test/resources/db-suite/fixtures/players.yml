@@ -1,0 +1,7 @@
+- id: 1
+  name: ada
+  joined: 2024-01-15
+  profile: {"level": 3}
+- id: 2
+  name: alan
+  joined: RAW=CURRENT_DATE

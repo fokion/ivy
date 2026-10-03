@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,130 +19,114 @@ import xyz.fokion.ivy.spi.ConnectorClass;
 import xyz.fokion.ivy.spi.DefaultAssertionsProvider;
 import xyz.fokion.ivy.spi.StepContext;
 import xyz.fokion.ivy.spi.Struct;
-import xyz.fokion.ivy.spi.ZeroValueResultProvider;
-import xyz.fokion.ivy.spi.util.Json;
+import xyz.fokion.ivy.spi.util.LazyJson;
 
 /**
- * Reads files, port of venom's {@code readfile} executor. Errors are reported in
- * {@code result.err} rather than failing the step.
+ * Reads files matching a path or a glob. Errors are reported in {@code result.error} rather than
+ * failing the step.
+ * <p>
+ * Result: {@code files} (each with {@code path}, {@code content}, {@code json}, {@code md5},
+ * {@code size}, {@code modTime} and {@code mode}), {@code content} (all files),
+ * {@code json} (the content parsed, YAML files included), {@code durationMs} and {@code error}.
  */
 @ConnectorClass(type = "readfile", configurationClass = ReadfileConfiguration.class)
-public final class ReadfileConnector implements Connector<ReadfileConfiguration>, DefaultAssertionsProvider,
-        ZeroValueResultProvider {
+public final class ReadfileConnector implements Connector<ReadfileConfiguration>, DefaultAssertionsProvider {
 
     @Override
-    public List<Object> defaultAssertions() {
-        return List.of("result.err ShouldBeEmpty");
+    public java.util.Map<String, String> resultFields() {
+        return Connector.fields(
+                "files", "each file read: path, content, json, md5, size, modTime, mode",
+                "content", "the content of all files, concatenated",
+                "json", "the content parsed as JSON or YAML",
+                "durationMs", "the duration in milliseconds",
+                "error", "why reading failed, empty otherwise");
     }
 
     @Override
-    public Object zeroValueResult() {
-        return new ReadResult(null).result(0);
+    public List<Object> defaultAssertions() {
+        return List.of("isEmpty(result.error)");
     }
 
     @Override
     public Object run(ReadfileConfiguration config, StepContext context) {
         long start = System.nanoTime();
-        ReadResult files = new ReadResult(null);
+        List<Object> files = new ArrayList<>();
+        StringBuilder content = new StringBuilder();
+        String error = "";
         try {
-            files = read(config.getPath(), context);
+            read(config.getPath(), context, files, content);
         } catch (ReadException e) {
-            files = e.partial;
-            files.err = e.getMessage();
+            error = e.getMessage();
         }
-        return files.result((System.nanoTime() - start) / 1e9);
-    }
-
-    /** The accumulated result. */
-    private static final class ReadResult {
-        String content = "";
-        Object contentJson;
-        String err = "";
-        final Map<String, String> md5sum = new LinkedHashMap<>();
-        final Map<String, Long> size = new LinkedHashMap<>();
-        final Map<String, Long> modtime = new LinkedHashMap<>();
-        final Map<String, String> mod = new LinkedHashMap<>();
-
-        ReadResult(Object contentJson) {
-            this.contentJson = contentJson;
-        }
-
-        Struct result(double seconds) {
-            return Struct.builder("Result")
-                    .put("content", content)
-                    .put("contentjson", contentJson)
-                    .put("err", err)
-                    .put("timeseconds", seconds)
-                    .put("md5sum", md5sum)
-                    .put("size", size)
-                    .put("modtime", modtime)
-                    .put("mod", mod)
-                    .build();
-        }
+        String all = content.toString();
+        return Struct.builder("Result")
+                .put("files", files)
+                .put("content", all)
+                .put("json", json(config.getPath(), all, context))
+                .put("durationMs", (System.nanoTime() - start) / 1_000_000)
+                .put("error", error)
+                .build();
     }
 
     private static final class ReadException extends Exception {
-        final transient ReadResult partial;
-
-        ReadException(String message, ReadResult partial) {
+        ReadException(String message) {
             super(message);
-            this.partial = partial;
         }
     }
 
-    private static ReadResult read(String path, StepContext context) throws ReadException {
-        ReadResult r = new ReadResult(null);
-        String workdir = context.var("venom.testsuite.workdir");
-        Path wd = workdir == null || workdir.isEmpty() ? Path.of("").toAbsolutePath() : Path.of(workdir);
+    private static void read(String path, StepContext context, List<Object> files, StringBuilder content)
+            throws ReadException {
+        Path wd = context.workdir();
         String absPath = Path.of(path).isAbsolute() ? path : wd.resolve(path).toString();
         if (Files.isDirectory(Path.of(absPath))) {
             absPath = Path.of(absPath).getParent().toString();
         }
-        List<Path> files;
+        List<Path> matched;
         try {
-            files = SuiteFiles.glob(absPath);
+            matched = SuiteFiles.glob(absPath);
         } catch (Exception e) {
-            throw new ReadException("Error reading files on path:" + absPath + " :file does not exist", r);
+            throw new ReadException("Error reading files on path:" + absPath + " :file does not exist");
         }
-        if (files.isEmpty()) {
-            throw new ReadException("Invalid path '" + absPath + "' or file not found", r);
+        if (matched.isEmpty()) {
+            throw new ReadException("Invalid path '" + absPath + "' or file not found");
         }
-        StringBuilder content = new StringBuilder();
-        for (Path f : files) {
+        for (Path f : matched) {
             String relative = wd.relativize(f.toAbsolutePath()).toString();
             byte[] bytes;
             try {
                 bytes = Files.readAllBytes(f);
             } catch (IOException e) {
-                throw new ReadException("error while opening file: " + e.getMessage(), r);
+                throw new ReadException("error while opening file: " + e.getMessage());
             }
-            content.append(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            r.md5sum.put(relative, md5(bytes));
+            String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            content.append(text);
+            Map<String, Object> file = new LinkedHashMap<>();
+            file.put("path", relative);
+            file.put("content", text);
+            file.put("json", json(relative, text, context));
+            file.put("md5", md5(bytes));
             try {
-                r.size.put(relative, Files.size(f));
-                r.modtime.put(relative, Files.getLastModifiedTime(f).toInstant().getEpochSecond());
-                r.mod.put(relative, mode(f));
+                file.put("size", Files.size(f));
+                file.put("modTime", Files.getLastModifiedTime(f).toInstant().toEpochMilli());
+                file.put("mode", mode(f));
             } catch (IOException e) {
-                throw new ReadException("error while compute file size: " + e.getMessage(), r);
+                throw new ReadException("error while reading the attributes of " + relative + ": " + e.getMessage());
             }
+            files.add(file);
         }
-        r.content = content.toString();
-        r.contentJson = List.of();
-        String json = r.content;
-        if (path.endsWith("yaml") || path.endsWith("yml")) {
-            context.log(StepContext.Level.DEBUG, "trying to parse yaml file");
+    }
+
+    /** The content parsed when the first time it is read: YAML files as YAML, others as JSON. */
+    private static Object json(String path, String text, StepContext context) {
+        if (path.endsWith(".yaml") || path.endsWith(".yml")) {
             try {
-                json = Yaml.toJson(Yaml.load(r.content));
+                return Yaml.load(text);
             } catch (Yaml.YamlException e) {
-                context.log(StepContext.Level.WARN, "could not convert payload from file");
-                return r;
+                context.log(StepContext.Level.WARN, "could not read " + path + " as YAML: " + e.getMessage());
+                return null;
             }
         }
-        Object parsed = Json.tryParse(json);
-        if (parsed != null) {
-            r.contentJson = parsed;
-        }
-        return r;
+        return LazyJson.of(text);
     }
 
     private static String md5(byte[] bytes) {

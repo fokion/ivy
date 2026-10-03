@@ -1,0 +1,10 @@
+name: retry
+testcases:
+- name: retry until it passes
+  steps:
+  - script: echo x >> retry-counter.txt && wc -l < retry-counter.txt | tr -d ' '
+    retry: 3
+    delay: 0
+    assertions:
+    - result.stdout == 3
+  - script: rm -f retry-counter.txt

@@ -1,0 +1,5 @@
+// The redis connector: runs redis commands.
+dependencies {
+    bundled 'redis.clients:jedis:8.0.1'
+    bundled "org.slf4j:slf4j-nop:${slf4jVersion}"
+}

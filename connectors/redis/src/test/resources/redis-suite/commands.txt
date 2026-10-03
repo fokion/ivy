@@ -1,0 +1,2 @@
+SET fromfile "line one"
+GET fromfile
