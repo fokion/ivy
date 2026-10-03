@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,50 +19,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 import xyz.fokion.ivy.core.engine.Ivy.IvyException;
 import xyz.fokion.ivy.core.log.IvyLog;
+import xyz.fokion.ivy.core.log.Secrets;
+import xyz.fokion.ivy.core.model.Status;
 import xyz.fokion.ivy.core.model.TestCase;
 import xyz.fokion.ivy.core.model.TestStepResult;
-import xyz.fokion.ivy.core.model.TestSuite;
 import xyz.fokion.ivy.core.util.GoStrings;
 import xyz.fokion.ivy.core.yaml.Yaml;
 import xyz.fokion.ivy.core.yaml.Yaml.TestCaseLines;
-import xyz.fokion.ivy.spi.util.GoFormat;
-import xyz.fokion.ivy.spi.util.Json;
 
 /**
- * Ported from venom's root package tests: quote_escaping_test.go, process_files_test.go,
- * venom_output_test.go, log_test.go, read_partial_test.go, process_testcase_test.go,
- * types_test.go and assertion_test.go.
+ * Engine units (file discovery, line numbers, secrets, logging) and suites run end to end.
  */
 class EngineTest {
-
-    // ------------------------------------------------------------ quote_escaping_test.go
-
-    @Test
-    void escapesQuotes() {
-        assertEquals("{\\\"errors\\\":[{\\\"message\\\":\\\"ERROR: conflicting key value violates exclusion constraint "
-                        + "\\\\\\\"age_group_id_range_unique\\\\\\\" (SQLSTATE 23P01)\\\",\\\"path\\\":[\\\"ageGroup\\\"]}],\\\"data\\\":null}",
-                PartialYaml.escapeQuotes("{\"errors\":[{\"message\":\"ERROR: conflicting key value violates exclusion "
-                        + "constraint \\\"age_group_id_range_unique\\\" (SQLSTATE 23P01)\",\"path\":[\"ageGroup\"]}],\"data\":null}"));
-        assertEquals("simple \\\"quoted\\\" text", PartialYaml.escapeQuotes("simple \"quoted\" text"));
-        assertEquals("no quotes here", PartialYaml.escapeQuotes("no quotes here"));
-        assertEquals("", PartialYaml.escapeQuotes(""));
-    }
-
-    @Test
-    void escapedJsonSurvivesInterpolationAndYaml() throws Exception {
-        for (String json : List.of(
-                "{\"errors\":[{\"message\":\"ERROR: constraint \\\"age_group_id_range_unique\\\" (SQLSTATE 23P01)\"}],\"data\":null}",
-                "{\"data\":{\"message\":\"success\"}}",
-                "{\"user\":{\"name\":\"John \\\"Johnny\\\" Doe\"}}")) {
-            String interpolated = "{\"result\":{\"body\":\"{{.body}}\"}}".replace("{{.body}}", PartialYaml.escapeQuotes(json));
-            Json.parse(interpolated);
-            Map<String, Object> m = Yaml.loadMap(interpolated);
-            assertEquals(json, ((Map<?, ?>) m.get("result")).get("body"));
-        }
-        Map<String, Object> m = Yaml.loadMap("\nresult:\n  body: \"" + PartialYaml.escapeQuotes(
-                "{\"message\":\"constraint \\\"age_group_id_range_unique\\\"\"}") + "\"\n  statuscode: 200\n");
-        assertTrue(((Map<?, ?>) m.get("result")).get("body").toString().contains("age_group_id_range_unique"));
-    }
 
     // ------------------------------------------------------------ process_files_test.go
 
@@ -112,8 +79,8 @@ class EngineTest {
                     method: GET
                     url: https://example.com
                     assertions:
-                    - result.statuscode ShouldEqual 200
-                    - result.body ShouldContainSubstring hello
+                    - result.status == 200
+                    - result.body contains "hello"
 
                 - name: post http testcase
                   steps:
@@ -121,16 +88,16 @@ class EngineTest {
                     method: POST
                     url: https://example.com/api
                     assertions:
-                    - result.statuscode ShouldEqual 201
+                    - result.status == 201
                   - type: exec
                     script: echo done
                     assertions:
-                    - result.code ShouldEqual 0
-                    - result.systemout ShouldContainSubstring done
+                    - result.exitCode == 0
+                    - result.stdout contains "done"
                 """;
         List<TestCaseLines> infos = Yaml.lineNumbers(yaml);
         assertEquals(2, infos.size());
-        assertEquals(6, infos.get(0).testCaseLine());
+        assertEquals(6, infos.getFirst().testCaseLine());
         assertEquals(List.of(8), infos.get(0).stepLines());
         assertEquals(List.of(List.of(12, 13)), infos.get(0).assertionLines());
         assertEquals(15, infos.get(1).testCaseLine());
@@ -155,176 +122,356 @@ class EngineTest {
         assertEquals(0, new TestCase().findSourceLine(0, 0));
     }
 
-    // ------------------------------------------------------------ venom_output_test.go
+    // ------------------------------------------------------------ secrets
 
     private static Ivy ivy() {
         return new Ivy(new PrintStream(PrintStream.nullOutputStream()));
     }
 
-    private static TestSuite authSuite() {
-        TestSuite ts = new TestSuite();
-        ts.name = "HTTP Auth Test";
-        ts.secrets = List.of("basic_auth_password");
-        ts.vars.put("url", "http://127.0.0.1:8000");
-        ts.vars.put("basic_auth_user", "testuser");
-        ts.vars.put("basic_auth_password", "my_secret");
-        return ts;
-    }
-
     @Test
-    void cleansUpSecrets() {
-        TestSuite ts = authSuite();
-        TestCase tc = new TestCase();
-        tc.name = "GET with credentials";
-        tc.vars.put("basic_auth_password", "my_secret");
-        TestStepResult r = new TestStepResult();
-        r.name = "GET-with-credentials";
-        r.inputVars = new LinkedHashMap<>(Map.of("basic_auth_user", "testuser", "basic_auth_password", "my_secret"));
-        r.raw = "type: http\nbasic_auth_password: \"{{.basic_auth_password}}\"\n".getBytes(StandardCharsets.UTF_8);
-        r.interpolated = "type: http\nbasic_auth_password: my_secret\nbasic_auth_user: testuser\nmethod: GET\n"
-                .getBytes(StandardCharsets.UTF_8);
-        r.systemout = "Authorization: Basic dGVzdHVzZXI6bXlfc2VjcmV0";
-        tc.testStepResults.add(r);
-        ts.testCases.add(tc);
-
-        TestSuite cleaned = Outputs.cleanUpSecrets(ivy(), ts);
-        assertEquals("__hidden__", cleaned.vars.get("basic_auth_password"));
-        assertEquals("testuser", cleaned.vars.get("basic_auth_user"));
-        TestStepResult result = cleaned.testCases.getFirst().testStepResults.getFirst();
-        assertEquals("__hidden__", result.inputVars.get("basic_auth_password"));
-        assertFalse(new String(result.raw, StandardCharsets.UTF_8).contains("my_secret"));
-        assertFalse(new String(result.interpolated, StandardCharsets.UTF_8).contains("my_secret"));
-        assertFalse(result.systemout.contains("my_secret"));
-        assertFalse(result.systemout.contains("dGVzdHVzZXI6bXlfc2VjcmV0"));
-        assertFalse(Json.write(cleaned.toJson()).contains("my_secret"));
-    }
-
-    @Test
-    void replacesLongestSecretsFirst() {
-        assertEquals("__hidden__", IvyLog.replaceSecrets("foobar", List.of("foo", "foobar")));
-        assertEquals("basic_auth_password: __hidden__\n",
-                IvyLog.hideSensitive("basic_auth_password: my_secret\n", List.of("my_secret")));
-    }
-
-    @Test
-    void derivesBasicAuthSecrets() {
-        List<String> secrets = ivy().computeSecrets(authSuite(), null);
-        String token = Base64.getEncoder().encodeToString("testuser:my_secret".getBytes(StandardCharsets.UTF_8));
-        assertTrue(secrets.contains(token));
-        assertEquals("__hidden__", IvyLog.hideSensitive(token, secrets));
-    }
-
-    @Test
-    void derivesSecretsFromTestCaseVars() {
-        TestSuite ts = new TestSuite();
-        ts.secrets = List.of("basic_auth_password");
-        TestCase tc = new TestCase();
-        tc.vars.put("basic_auth_user", "testuser");
-        tc.vars.put("basic_auth_password", "my_secret");
-        ts.testCases.add(tc);
-        List<String> secrets = ivy().computeSecrets(ts, tc);
-        String token = Base64.getEncoder().encodeToString("testuser:my_secret".getBytes(StandardCharsets.UTF_8));
-        assertEquals("__hidden__", IvyLog.hideSensitive(token, secrets));
-        assertEquals("__hidden__", IvyLog.hideSensitive(Base64.getEncoder().encodeToString("my_secret".getBytes()), secrets));
-        assertFalse(IvyLog.hideSensitive("Authorization: Basic " + token, secrets).contains(token));
-    }
-
-    @Test
-    void hidesSuiteSecrets() {
-        TestSuite ts = new TestSuite();
-        ts.secrets = List.of("token");
-        ts.vars.put("token", "secret-value");
-        assertEquals("__hidden__", IvyLog.hideSensitive("secret-value", ivy().computeSecrets(ts, null)));
-    }
-
-    // ------------------------------------------------------------ log_test.go
-
-    @Test
-    void hidesSensitiveValues() {
-        List<String> secrets = List.of("Joe", "Doe");
-        assertEquals("__hidden__", IvyLog.hideSensitive("Joe", secrets));
-        assertEquals("__hidden__ tests something", IvyLog.hideSensitive("Joe tests something", secrets));
-        assertEquals("Dave tests something", IvyLog.hideSensitive("Dave tests something", secrets));
-        assertEquals("1234", IvyLog.hideSensitive(1234L, secrets));
-        assertEquals("__hidden__!", IvyLog.hideSensitive("Doe!", secrets));
-        assertEquals("__hidden__ __hidden__", IvyLog.hideSensitive("Joe Doe", secrets));
-    }
-
-    @Test
-    void logRedactsSecrets() {
+    void logHidesSecrets() {
         StringWriter out = new StringWriter();
-        IvyLog log = new IvyLog(out, IvyLog.Level.DEBUG);
-        IvyLog.Fields f = IvyLog.Fields.EMPTY.withTestsuite("suite").withSecrets(List.of("my_secret"));
+        Secrets secrets = new Secrets();
+        secrets.add("my_secret");
+        IvyLog log = new IvyLog(out, IvyLog.Level.DEBUG, secrets);
+        IvyLog.Fields f = IvyLog.Fields.EMPTY.withTestsuite("suite");
         log.info(f, "step content: basic_auth_password: my_secret");
-        log.debug(f, "with vars: " + GoFormat.sprint(Map.of("basic_auth_password", "my_secret")));
         log.debug(f, "count=42 ratio=1.50 ok=true");
+        log.flush();
         String s = out.toString();
         assertFalse(s.contains("my_secret"));
         assertTrue(s.contains("[INFO] [suite] step content: basic_auth_password: __hidden__"));
         assertTrue(s.contains("[DEBU] [suite] count=42 ratio=1.50 ok=true"));
     }
 
-    // ------------------------------------------------------------ read_partial_test.go
-
     @Test
-    void readsPartialYaml() {
-        String content = """
-
-                foo:
-                  - foo1
-                  - foo2
-
-                record:
-                  - val
-                  - to be recorded
-
-                bar:
-                  bar1: bar1v
-                  bar2: bar2v
-                \t\t\t\t""";
-        assertEquals("record:\n  - val\n  - to be recorded\n", PartialYaml.read(content, "record"));
-        assertEquals("record:\n- val\n- to be recorded\n",
-                PartialYaml.read(content.replace("  - ", "- "), "record"));
+    void hidesSecretsEverywhere(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("suite.yml"), """
+                name: secrets
+                secrets: [password, token, db.password, api_key]
+                vars:
+                  password: "p<a>ss&word"
+                  db:
+                    host: localhost
+                    password: db-pa55
+                testcases:
+                - name: login
+                  steps:
+                  - script: echo "token=tok-123456 ${password} ${db.password} ${cli_secret}"
+                    set:
+                      token: result.stdout.match("token=([\\w-]+)")[1]
+                    assertions:
+                    - result.stdout contains "never"
+                  - type: http
+                    url: http://127.0.0.1:1/
+                    basic_auth_user: ada
+                    basic_auth_password: ${password}
+                - name: reuse
+                  steps:
+                  - script: echo ${cases.login.token ?? "none"} | base64
+                """);
+        java.io.ByteArrayOutputStream console = new java.io.ByteArrayOutputStream();
+        Ivy ivy = new Ivy(new PrintStream(console, true, StandardCharsets.UTF_8)).colors(false).verbose(2)
+                .outputDir(dir.resolve("out").toString()).outputFormat("xml").htmlReport(true);
+        ivy.addSecrets(Map.of("cli_secret", "from-the-command-line"));
+        ivy.initLogger();
+        try {
+            ivy.parse(List.of(suite.toString()));
+            ivy.process();
+            Outputs.write(ivy);
+        } finally {
+            ivy.close();
+        }
+        StringBuilder everything = new StringBuilder(console.toString(StandardCharsets.UTF_8));
+        try (var files = Files.list(dir.resolve("out"))) {
+            for (Path f : files.toList()) {
+                everything.append(Files.readString(f));
+            }
+        }
+        String all = everything.toString();
+        for (String secret : List.of("p<a>ss&word", "p&lt;a&gt;ss&amp;word", "db-pa55", "tok-123456", "from-the-command-line",
+                Base64.getEncoder().encodeToString("ada:p<a>ss&word".getBytes(StandardCharsets.UTF_8)),
+                Base64.getEncoder().encodeToString("tok-123456\n".getBytes(StandardCharsets.UTF_8)).replace("=", ""))) {
+            assertFalse(all.contains(secret), secret + " leaked: " + all.substring(Math.max(0, all.indexOf(secret) - 300),
+                    Math.min(all.length(), all.indexOf(secret) + 100)));
+        }
+        assertTrue(all.contains("__hidden__"));
+        assertTrue(all.contains("localhost"), "values that are not secret stay");
     }
 
-    // ------------------------------------------------------------ process_testcase_test.go
-
-    @Test
-    void processesVariableAssignments() throws Exception {
-        Map<String, Object> vars = Map.of("here.some.value", "this is the \nvalue");
-        String step = Json.write(Map.of("vars", Map.of(
-                "assignVar", Map.of("from", "here.some.value"),
-                "assignVarWithRegex", Map.of("from", "here.some.value", "regex", "this is (?s:(.*))"))));
-        Map<String, Object> result = StepProcessor.processVariableAssignments(RunContext.root(), "", vars, step);
-        assertEquals("map[assignVar:this is the \nvalue assignVarWithRegex:the \nvalue]", GoFormat.sprint(result));
-
-        assertTrue(StepProcessor.processVariableAssignments(RunContext.root(), "", vars,
-                Json.write(Map.of("type", "exec", "script", "echo 'foo'"))).isEmpty());
-        assertThrows(IvyException.class, () -> StepProcessor.processVariableAssignments(RunContext.root(), "", vars,
-                Json.write(Map.of("vars", Map.of("x", Map.of("from", "missing"))))));
-        assertEquals("fallback", StepProcessor.processVariableAssignments(RunContext.root(), "", vars,
-                Json.write(Map.of("vars", Map.of("x", Map.of("from", "missing", "default", "fallback"))))).get("x"));
-    }
-
-    // ------------------------------------------------------------ types_test.go, assertion_test.go
+    // ------------------------------------------------------------ strings
 
     @Test
     void removesNotPrintableCharacters() {
         assertEquals("python-mysqldb :  [34mOK [0m", GoStrings.removeNotPrintable("python-mysqldb : \u001b[34mOK\u001b[0m"));
     }
 
-    @Test
-    void splitsAssertions() {
-        assertEquals(List.of("cmd", "arg"), AssertionChecker.splitAssertion("cmd arg"));
-        assertEquals(List.of("cmd", "arg1", "arg 2"), AssertionChecker.splitAssertion("cmd arg1 \"arg 2\""));
-        assertEquals(List.of("cmd", "arg 1", "arg 2"), AssertionChecker.splitAssertion("cmd 'arg 1' \"arg 2\""));
-        assertEquals(List.of("cmd", "arg 1", "'arg' 2"), AssertionChecker.splitAssertion("cmd 'arg 1' \"'arg' 2\""));
-        assertEquals(List.of("cmd", "\"arg 1\"", "'arg' 2"), AssertionChecker.splitAssertion("cmd '\"arg 1\"' \"'arg' 2\""));
+    // ------------------------------------------------------------ regressions
+
+    private static Ivy runSuite(Path dir, String yaml) throws Exception {
+        Path suite = Files.writeString(dir.resolve("suite.yml"), yaml);
+        Ivy ivy = ivy().outputDir(dir.resolve("out").toString());
+        ivy.initLogger();
+        try {
+            ivy.parse(List.of(suite.toString()));
+            ivy.process();
+        } finally {
+            ivy.close();
+        }
+        return ivy;
+    }
+
+    private static List<String> errors(Ivy ivy) {
+        return ivy.tests().testSuites.getFirst().testCases.stream()
+                .flatMap(tc -> tc.testStepResults.stream())
+                .flatMap(r -> r.errorList().stream())
+                .map(f -> f.value)
+                .toList();
     }
 
     @Test
-    void quotesTemplateExpressions() {
-        assertEquals("key: \"{{.value}}\"\n\"json\": {{.v}}",
-                PartialYaml.quoteTemplateExpressions("key: {{.value}}\n\"json\": {{.v}}"));
+    void failingAssertionsOnMissingValuesFailTheStepOnly(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: missing
+                testcases:
+                - name: first
+                  steps:
+                  - script: echo '{}'
+                    assertions:
+                    - result.json.missing.deeper in ["a", "b"]
+                - name: second
+                  steps:
+                  - script: echo ok
+                """);
+        assertEquals(Status.FAIL, ivy.tests().status);
+        assertEquals(Status.PASS, ivy.tests().testSuites.getFirst().testCases.get(1).status);
+    }
+
+    @Test
+    void reportsTheValuesOfAFailedAssertion(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: values
+                testcases:
+                - name: compare
+                  steps:
+                  - script: echo '{"items":[{"id":1},{"id":2}]}'
+                    assertions:
+                    - result.json.items.length > 2 && result.exitCode == 0
+                """);
+        String error = errors(ivy).getFirst();
+        assertTrue(error.startsWith("Testcase \"compare\", step #1 (" + dir.resolve("suite.yml") + ":7): assertion failed: "
+                + "result.json.items.length > 2 && result.exitCode == 0"), error);
+        assertTrue(error.endsWith("\n  result.json.items.length = 2"), error);
+    }
+
+    @Test
+    void rendersTypedTemplatesAndRanges(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: typed
+                vars:
+                  a: hello
+                  items: [1, 2, 3]
+                  greeting: ${a} world
+                testcases:
+                - name: ranged
+                  steps:
+                  - range: ${items}
+                    script: echo ${value * 10} ${greeting}
+                    assertions:
+                    - result.stdout == (value * 10) + " hello world"
+                    - index < 3
+                  - range: items.filter(i => i > 1)
+                    script: echo ${value}
+                    assertions:
+                    - result.stdout > 1
+                """);
+        assertEquals(List.of(), errors(ivy));
+        assertEquals(5, ivy.tests().testSuites.getFirst().testCases.getFirst().testStepResults.size());
+    }
+
+    @Test
+    void timesOutSteps(@TempDir Path dir) throws Exception {
+        long start = System.nanoTime();
+        Ivy ivy = runSuite(dir, """
+                name: timeout
+                testcases:
+                - name: slow
+                  steps:
+                  - script: sleep 5
+                    timeout: 1
+                """);
+        assertTrue((System.nanoTime() - start) / 1e9 < 4);
+        assertTrue(errors(ivy).getFirst().contains("Timeout after 1 second(s)"), errors(ivy).toString());
+    }
+
+    @Test
+    void setsValuesForLaterStepsAndTestCases(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: set
+                testcases:
+                - name: extract id
+                  steps:
+                  - script: echo id=42
+                    assertions:
+                    - result.stdout matches "id=(?P<id>[0-9]+)"
+                    set:
+                      id: result.stdout.match("id=(?P<id>[0-9]+)")[1]
+                      label: "id ${result.stdout}"
+                  - script: echo ${id}
+                    assertions:
+                    - result.stdout == 42
+                    - label == "id id=42"
+                - name: reuse
+                  steps:
+                  - script: echo ${cases["extract-id"].id}
+                    assertions:
+                    - result.stdout === "42"
+                """);
+        assertEquals(List.of(), errors(ivy));
+    }
+
+    @Test
+    void skipsWithConditions(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: conditions
+                vars:
+                  enabled: false
+                testcases:
+                - name: never
+                  if: enabled
+                  steps:
+                  - script: exit 1
+                - name: some steps
+                  steps:
+                  - script: exit 1
+                    if: enabled
+                  - script: echo ran
+                    if: "!enabled"
+                """);
+        assertEquals(List.of(), errors(ivy));
+        List<TestCase> cases = ivy.tests().testSuites.getFirst().testCases;
+        assertEquals(Status.SKIP, cases.get(0).status);
+        assertEquals(Status.SKIP, cases.get(1).testStepResults.get(0).status);
+        assertEquals(Status.PASS, cases.get(1).testStepResults.get(1).status);
+    }
+
+    @Test
+    void stopsOnRequiredAssertions(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: must
+                testcases:
+                - name: required
+                  steps:
+                  - script: echo a
+                    assertions:
+                    - must: result.stdout == "b"
+                  - script: echo never
+                """);
+        TestCase tc = ivy.tests().testSuites.getFirst().testCases.getFirst();
+        assertEquals(1, tc.testStepResults.size());
+        assertTrue(errors(ivy).getLast().contains("the remaining steps are skipped"), errors(ivy).toString());
+    }
+
+    @Test
+    void retriesWhileTheConditionHolds(@TempDir Path dir) throws Exception {
+        Ivy ivy = runSuite(dir, """
+                name: retry
+                testcases:
+                - name: retried
+                  steps:
+                  - script: echo nope
+                    retry: 3
+                    retryIf: result.stdout != "nope"
+                    assertions:
+                    - result.stdout == "yes"
+                """);
+        TestStepResult r = ivy.tests().testSuites.getFirst().testCases.getFirst().testStepResults.getFirst();
+        assertEquals(0, r.retries);
+        assertTrue(errors(ivy).stream().anyMatch(e -> e.contains("retryIf result.stdout != \"nope\" is false")),
+                errors(ivy).toString());
+    }
+
+    @Test
+    void reportsMissingVariables(@TempDir Path dir) {
+        IvyException e = assertThrows(IvyException.class, () -> runSuite(dir, """
+                name: typo
+                vars:
+                  url: x
+                testcases:
+                - name: first
+                  steps:
+                  - script: echo ${ulr} ${url} ${cases.first.out} ${env.HOME}
+                    assertions:
+                    - result.exitCode == 0 && out != ""
+                    set:
+                      out: result.stdout
+                """));
+        assertTrue(e.getMessage().startsWith("missing variables [ulr]"), e.getMessage());
+    }
+
+    @Test
+    void explainsTheSyntaxOfOlderVersions(@TempDir Path dir) {
+        for (String[] old : new String[][] {
+                {"script: echo {{.a}}", "templates are written ${...} now"},
+                {"script: echo\n    assertions:\n    - result.code ShouldEqual 0", "assertions are expressions now"},
+                {"script: echo\n    skip:\n    - a ShouldBeTrue", "'skip' is now 'if'"},
+                {"script: echo\n    retry_if:\n    - a ShouldBeTrue", "'retry_if' is now 'retryIf'"},
+                {"script: echo\n    vars:\n      x:\n        from: result.stdout", "step 'vars' is now 'set'"}}) {
+            IvyException e = assertThrows(IvyException.class, () -> runSuite(dir, """
+                    name: old
+                    vars:
+                      a: 1
+                    testcases:
+                    - name: first
+                      steps:
+                      - %s
+                    """.formatted(old[0])));
+            assertTrue(e.getMessage().contains(old[1]), e.getMessage());
+            assertTrue(e.getMessage().startsWith(dir.resolve("suite.yml") + ":7: "), e.getMessage());
+        }
+    }
+
+    @Test
+    void reportsSyntaxErrorsWithTheirLine(@TempDir Path dir) {
+        IvyException e = assertThrows(IvyException.class, () -> runSuite(dir, """
+                name: syntax
+                testcases:
+                - name: first
+                  steps:
+                  - script: echo
+                    assertions:
+                    - result.exitCode ==
+                """));
+        assertTrue(e.getMessage().startsWith(dir.resolve("suite.yml") + ":5: test case \"first\", step #1: "
+                + "unexpected end of expression"), e.getMessage());
+    }
+
+    @Test
+    void writesReportsWithoutSecretsAndCutsLongValues(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("suite.yml"), """
+                name: report
+                secrets: [token]
+                vars:
+                  token: s3cr3t-value
+                testcases:
+                - name: long
+                  steps:
+                  - script: printf 'x%.0s' $(seq 1 500); echo ${token}
+                """);
+        Ivy ivy = ivy().outputDir(dir.resolve("out").toString()).outputFormat("json").htmlReport(true).reportMaxValue(100);
+        ivy.initLogger();
+        try {
+            ivy.parse(List.of(suite.toString()));
+            ivy.process();
+            Outputs.write(ivy);
+        } finally {
+            ivy.close();
+        }
+        String json = Files.readString(dir.resolve("out/test_results_suite.json"));
+        String html = Files.readString(dir.resolve("out/test_results.html"));
+        assertFalse(json.contains("s3cr3t-value"));
+        assertFalse(html.contains("s3cr3t-value"));
+        assertTrue(json.contains("more characters"), json);
+        assertFalse(json.contains("x".repeat(101)));
     }
 }

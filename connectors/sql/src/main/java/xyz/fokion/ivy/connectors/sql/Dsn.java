@@ -1,6 +1,5 @@
 package xyz.fokion.ivy.connectors.sql;
 
-import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -14,13 +13,14 @@ import java.util.regex.Pattern;
 import xyz.fokion.ivy.spi.ConnectorException;
 
 /**
- * Translates the DSNs venom suites use (Go drivers) into JDBC URLs. A DSN starting with
+ * Translates Go database driver DSNs into JDBC URLs. A DSN starting with
  * {@code jdbc:} is used as is.
  */
 final class Dsn {
 
+    /** {@code [net(address)]/db[?params]}, after the credentials are cut at the last '@'. */
     private static final Pattern MYSQL = Pattern.compile(
-            "^(?:(?<user>[^:@]*)(?::(?<password>[^@]*))?@)?(?:(?<net>\\w+)\\((?<address>[^)]*)\\))?/(?<db>[^?]*)(?:\\?(?<params>.*))?$");
+            "^(?:(?<net>\\w+)\\((?<address>[^)]*)\\))?/(?<db>[^?]*)(?:\\?(?<params>.*))?$");
 
     private Dsn() {
     }
@@ -49,8 +49,9 @@ final class Dsn {
         if (path.equals(":memory:") || path.isEmpty()) {
             return "jdbc:sqlite::memory:";
         }
+        // relative paths are relative to the suite, unless the file exists in the working directory
         Path p = Path.of(path);
-        if (!p.isAbsolute() && workdir != null && !Files.exists(p) && Files.exists(workdir.resolve(p))) {
+        if (!p.isAbsolute() && workdir != null && !Files.exists(p)) {
             p = workdir.resolve(p);
         }
         return "jdbc:sqlite:" + p + query;
@@ -63,23 +64,37 @@ final class Dsn {
         String port = "5432";
         String db = "";
         if (dsn.startsWith("postgres://") || dsn.startsWith("postgresql://")) {
-            URI uri = URI.create(dsn);
-            if (uri.getHost() != null) {
-                host = uri.getHost();
-            }
-            if (uri.getPort() != -1) {
-                port = Integer.toString(uri.getPort());
-            }
-            db = uri.getPath() == null ? "" : uri.getPath().replaceFirst("^/", "");
-            if (uri.getRawUserInfo() != null) {
-                String[] up = uri.getRawUserInfo().split(":", 2);
+            // parsed by hand: passwords may contain '@' or other characters URI rejects
+            String rest = dsn.substring(dsn.indexOf("://") + 3);
+            int slash = rest.indexOf('/');
+            int question = rest.indexOf('?');
+            int end = slash >= 0 ? slash : question >= 0 ? question : rest.length();
+            String authority = rest.substring(0, end);
+            String tail = rest.substring(end);
+            int at = authority.lastIndexOf('@');
+            if (at >= 0) {
+                String[] up = authority.substring(0, at).split(":", 2);
                 params.put("user", decode(up[0]));
                 if (up.length > 1) {
                     params.put("password", decode(up[1]));
                 }
+                authority = authority.substring(at + 1);
             }
-            if (uri.getRawQuery() != null) {
-                for (String kv : uri.getRawQuery().split("&")) {
+            if (authority.isEmpty()) {
+                throw new ConnectorException("invalid postgres DSN: missing host");
+            }
+            int colon = authority.lastIndexOf(':');
+            if (colon > 0 && !authority.endsWith("]")) {
+                host = authority.substring(0, colon);
+                port = authority.substring(colon + 1);
+            } else {
+                host = authority;
+            }
+            int q = tail.indexOf('?');
+            String path = q >= 0 ? tail.substring(0, q) : tail;
+            db = path.replaceFirst("^/", "");
+            if (q >= 0 && q + 1 < tail.length()) {
+                for (String kv : tail.substring(q + 1).split("&")) {
                     String[] p = kv.split("=", 2);
                     params.put(decode(p[0]), p.length > 1 ? decode(p[1]) : "");
                 }
@@ -104,16 +119,23 @@ final class Dsn {
 
     /** {@code user:password@tcp(host:port)/db?params}. */
     private static String mysql(String dsn) {
+        Map<String, String> params = new LinkedHashMap<>();
+        // as Go's driver: the credentials end at the last '@' before the database path
+        int slash = dsn.lastIndexOf('/');
+        int at = slash < 0 ? -1 : dsn.lastIndexOf('@', slash);
+        if (at >= 0) {
+            String[] up = dsn.substring(0, at).split(":", 2);
+            if (!up[0].isEmpty()) {
+                params.put("user", up[0]);
+            }
+            if (up.length > 1) {
+                params.put("password", up[1]);
+            }
+            dsn = dsn.substring(at + 1);
+        }
         Matcher m = MYSQL.matcher(dsn);
         if (!m.matches()) {
             throw new ConnectorException("invalid mysql DSN");
-        }
-        Map<String, String> params = new LinkedHashMap<>();
-        if (m.group("user") != null && !m.group("user").isEmpty()) {
-            params.put("user", m.group("user"));
-        }
-        if (m.group("password") != null) {
-            params.put("password", m.group("password"));
         }
         if (m.group("params") != null && !m.group("params").isEmpty()) {
             for (String kv : m.group("params").split("&")) {
@@ -125,6 +147,10 @@ final class Dsn {
                     params.put("allowMultiQueries", p.length > 1 ? p[1] : "true");
                 }
             }
+        }
+        if ("unix".equals(m.group("net"))) {
+            // Connector/J reaches a socket through junixsocket, which is not bundled
+            throw new ConnectorException("mysql unix sockets are not supported, use tcp(host:port)");
         }
         String address = m.group("address") == null || m.group("address").isEmpty() ? "localhost:3306" : m.group("address");
         return "jdbc:mysql://" + address + "/" + m.group("db") + query(params);

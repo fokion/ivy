@@ -1,0 +1,41 @@
+name: ranged
+vars:
+  colors: ["red", "green"]
+testcases:
+- name: array
+  steps:
+  - range: [a, b, c]
+    script: echo ${index}=${value}
+    assertions:
+    - result.exitCode == 0
+    set:
+      last: result.stdout
+  - script: echo ${last}
+    assertions:
+    - result.stdout == "2=c"
+- name: number
+  steps:
+  - range: 3
+    script: echo ${value}
+    assertions:
+    - result.stdout in [0, 1, 2]
+- name: map
+  steps:
+  - range:
+      one: 1
+      two: 2
+    script: echo ${key}:${value}
+    assertions:
+    - result.stdout == "one:1" || result.stdout == "two:2"
+- name: from a variable
+  steps:
+  - range: colors
+    script: echo ${value}
+    assertions:
+    - result.stdout in colors
+- name: of objects
+  steps:
+  - range: [{name: a, size: 1}, {name: b, size: 2}]
+    script: echo ${value.name}
+    assertions:
+    - result.stdout == value.name && value.size == index + 1

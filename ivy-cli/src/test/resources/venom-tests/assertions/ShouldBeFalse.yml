@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldBeFalse
-  steps:
-  - script: echo false
-    assertions:
-    - result.systemout ShouldBeFalse

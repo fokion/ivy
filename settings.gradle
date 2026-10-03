@@ -10,4 +10,5 @@ pluginManagement {
 }
 rootProject.name = 'ivy'
 
-include 'ivy-api', 'ivy-core', 'ivy-cli', 'ivy-connector-server', 'connectors:sql'
+include 'ivy-api', 'ivy-core', 'ivy-cli', 'ivy-connector-server', 'connectors:sql', 'connectors:kafka',
+        'connectors:redis', 'connectors:mongo', 'connectors:couchbase', 'connectors:browser'

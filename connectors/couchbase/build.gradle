@@ -1,0 +1,6 @@
+// The couchbase connector: key-value actions and queries on Couchbase.
+dependencies {
+    bundled 'com.couchbase.client:java-client:3.12.3'
+    bundled "org.slf4j:slf4j-nop:${slf4jVersion}"
+    testImplementation 'org.testcontainers:testcontainers-couchbase'
+}

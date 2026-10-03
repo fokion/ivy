@@ -12,7 +12,7 @@ import xyz.fokion.ivy.spi.Struct;
 
 /**
  * Formats values the way Go's {@code fmt} and {@code strconv} packages do, so that reports and
- * interpolated values stay identical to venom's.
+ * interpolated values stay identical to Go programs'.
  */
 public final class GoFormat {
 
@@ -82,7 +82,7 @@ public final class GoFormat {
                 }
                 sb.append(']');
             }
-            case Object[] arr -> appendV(sb, List.of(arr), top);
+            case Object[] arr -> appendV(sb, java.util.Arrays.asList(arr), top);
             default -> sb.append(v);
         }
     }
@@ -117,11 +117,12 @@ public final class GoFormat {
 
     /**
      * Float formatting of Go's {@code encoding/json}: plain notation unless the magnitude is below
-     * 1e-6 or at least 1e21.
+     * 1e-6 or at least 1e21. NaN and infinities, which JSON cannot represent, are written as
+     * {@code null}.
      */
     public static String formatFloatJson(double f) {
         if (Double.isNaN(f) || Double.isInfinite(f)) {
-            throw new IllegalArgumentException("unsupported value: " + f);
+            return "null";
         }
         if (f == 0) {
             return "0";

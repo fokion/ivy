@@ -1,3 +1,0 @@
----
-myvar: "{{.MY_ENVAR}}"
-randomvar: '{{ randAlpha 3 }}'

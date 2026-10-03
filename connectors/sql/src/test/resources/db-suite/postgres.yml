@@ -1,0 +1,27 @@
+name: postgres
+testcases:
+- name: fixtures
+  steps:
+  - type: dbfixtures
+    database: postgres
+    dsn: ${pg_dsn}
+    schemas: [schemas/postgres.sql]
+    folder: fixtures
+    assertions:
+    - result.rows == 4
+    - result.tables contains "players"
+- name: queries
+  steps:
+  - type: sql
+    driver: postgres
+    dsn: ${pg_dsn}
+    commands:
+    - "SELECT p.name, c.label, p.profile->>'level' AS level FROM cards c JOIN players p ON p.id = c.player_id ORDER BY c.id"
+    - "SELECT card_count() AS n"
+    - "INSERT INTO players (name) VALUES ('grace') RETURNING id"
+    assertions:
+    - result.queries[0].rows[0].name == "ada"
+    - result.queries[0].rows[0].level == 3
+    - result.queries[0].rows[1].label == "king"
+    - result.queries[1].rows[0].n == 2
+    - result.queries[2].rows[0].id == 3

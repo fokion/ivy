@@ -24,7 +24,6 @@ import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509ExtendedTrustManager;
@@ -228,7 +227,10 @@ final class Tls {
         private void check(X509Certificate[] chain, String authType, String peerHost) throws CertificateException {
             delegate.checkServerTrusted(chain, authType);
             String expected = host != null ? host : peerHost;
-            if (expected != null && !matches(chain[0], expected)) {
+            if (expected == null) {
+                throw new CertificateException("x509: no host name to verify the certificate against");
+            }
+            if (!matches(chain[0], expected)) {
                 throw new CertificateException("x509: certificate is not valid for " + expected);
             }
         }
@@ -269,33 +271,42 @@ final class Tls {
         }
     }
 
-    /** Matches subject alternative names (DNS with wildcards, IP addresses), else the CN. */
+    /** Matches subject alternative names (DNS with wildcards, IP addresses); like Go, the CN is ignored. */
     static boolean matches(X509Certificate cert, String host) throws CertificateParsingException {
         String h = host.toLowerCase(Locale.ROOT);
         if (h.startsWith("[") && h.endsWith("]")) {
             h = h.substring(1, h.length() - 1);
         }
         Collection<List<?>> sans = cert.getSubjectAlternativeNames();
-        boolean hasDns = false;
-        if (sans != null) {
-            for (List<?> san : sans) {
-                int type = (Integer) san.get(0);
-                String value = String.valueOf(san.get(1)).toLowerCase(Locale.ROOT);
-                if (type == 2) {
-                    hasDns = true;
-                    if (dnsMatches(value, h)) {
-                        return true;
-                    }
-                } else if (type == 7 && value.equals(h)) {
-                    return true;
-                }
+        if (sans == null) {
+            return false;
+        }
+        for (List<?> san : sans) {
+            int type = (Integer) san.get(0);
+            String value = String.valueOf(san.get(1)).toLowerCase(Locale.ROOT);
+            if (type == 2 && dnsMatches(value, h)) {
+                return true;
+            }
+            if (type == 7 && sameAddress(value, h)) {
+                return true;
             }
         }
-        if (!hasDns) {
-            Matcher cn = Pattern.compile("CN=([^,]+)").matcher(cert.getSubjectX500Principal().getName());
-            return cn.find() && dnsMatches(cn.group(1).toLowerCase(Locale.ROOT), h);
-        }
         return false;
+    }
+
+    /** Compares IP addresses in any notation ({@code ::1} and {@code 0:0:0:0:0:0:0:1}). */
+    private static boolean sameAddress(String a, String b) {
+        if (a.equals(b)) {
+            return true;
+        }
+        if (!b.matches("[0-9a-f:.]+")) {
+            return false;
+        }
+        try {
+            return java.net.InetAddress.getByName(a).equals(java.net.InetAddress.getByName(b));
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
     }
 
     private static boolean dnsMatches(String pattern, String host) {
@@ -306,7 +317,4 @@ final class Tls {
         return pattern.equals(host);
     }
 
-    static SSLException wrap(GeneralSecurityException e) {
-        return new SSLException(e.getMessage(), e);
-    }
 }

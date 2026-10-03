@@ -13,12 +13,13 @@ public final class TestSuite {
     public List<TestCase> testCases = new ArrayList<>();
     public Map<String, Object> vars = new LinkedHashMap<>();
     public List<String> secrets = new ArrayList<>();
+    /** False for a suite that must not run at the same time as another one, such as one resetting a database. */
+    public boolean parallel = true;
 
     // computed
     public String shortName = "";
     public String filename = "";
     public String filepath = "";
-    public Map<String, Object> computedVars = new LinkedHashMap<>();
     public String workDir = "";
     public Status status;
     public double duration;
@@ -27,6 +28,8 @@ public final class TestSuite {
     public int nbTestcasesFail;
     public int nbTestcasesPass;
     public int nbTestcasesSkip;
+    /** The Gherkin feature this suite was built from, or null. */
+    public GherkinInfo.Feature feature;
 
     /** A shallow copy, used to report a suite without its unevaluated test cases. */
     public TestSuite copy() {
@@ -36,10 +39,10 @@ public final class TestSuite {
         c.testCases = new ArrayList<>(testCases);
         c.vars = new LinkedHashMap<>(vars);
         c.secrets = secrets;
+        c.parallel = parallel;
         c.shortName = shortName;
         c.filename = filename;
         c.filepath = filepath;
-        c.computedVars = computedVars;
         c.workDir = workDir;
         c.status = status;
         c.duration = duration;
@@ -48,6 +51,7 @@ public final class TestSuite {
         c.nbTestcasesFail = nbTestcasesFail;
         c.nbTestcasesPass = nbTestcasesPass;
         c.nbTestcasesSkip = nbTestcasesSkip;
+        c.feature = feature;
         return c;
     }
 
@@ -65,7 +69,6 @@ public final class TestSuite {
         m.put("shortname", shortName);
         m.put("filename", filename);
         m.put("filepath", filepath);
-        m.put("computed_vars", computedVars);
         m.put("workdir", workDir);
         m.put("status", Status.name(status));
         m.put("duration", duration);
@@ -74,6 +77,9 @@ public final class TestSuite {
         m.put("nbTestcasesFail", nbTestcasesFail);
         m.put("nbTestcasesPass", nbTestcasesPass);
         m.put("nbTestcasesSkip", nbTestcasesSkip);
+        if (feature != null) {
+            m.put("gherkin", feature.toJson());
+        }
         return m;
     }
 }

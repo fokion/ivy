@@ -2,17 +2,17 @@ package xyz.fokion.ivy.core.engine;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import xyz.fokion.ivy.core.engine.Ivy.IvyException;
-import xyz.fokion.ivy.core.log.IvyLog;
 import xyz.fokion.ivy.core.model.Failure;
 import xyz.fokion.ivy.core.model.Skipped;
 import xyz.fokion.ivy.core.model.Status;
@@ -26,53 +26,59 @@ import xyz.fokion.ivy.spi.util.Json;
 
 /**
  * Writes the reports of a run: one file per suite in the chosen format (json, yaml, tap, xml)
- * and optionally an HTML report of all suites.
+ * and optionally an HTML report of all suites. Reports are streamed to their files; secrets are
+ * hidden and long strings cut while writing.
  */
 public final class Outputs {
 
     private Outputs() {
     }
 
-    /** venom's {@code OutputResult}. */
+    /** Writes the reports of the run. */
     public static void write(Ivy ivy) throws IvyException {
         if (ivy.outputDir.isEmpty()) {
             return;
         }
         Path dir = Path.of(ivy.outputDir);
         Tests tests = ivy.tests;
-        List<TestSuite> cleaned = new ArrayList<>();
+        Json.Options options = Json.GO_INDENT.withMaxString(ivy.reportMaxValue);
+        // every secret of the run is hidden in every report
+        UnaryOperator<String> hide = ivy.secrets.filter();
         for (TestSuite suite : tests.testSuites) {
             suite.testCases.removeIf(tc -> !tc.isEvaluated);
-            TestSuite ts = cleanUpSecrets(ivy, suite);
-            cleaned.add(ts);
-            Tests result = tests.withSuites(List.of(ts));
-            String data = switch (ivy.outputFormat) {
-                case "json" -> Json.write(result.toJson(), Json.GO_INDENT);
-                case "tap" -> tap(result);
-                case "yml", "yaml" -> Yaml.dump(Json.parse(Json.write(result.toJson())));
-                case "xml" -> xml(result, ivy.verbose);
-                case "html" -> throw new IvyException("Error: you have to use the --html-report flag");
-                default -> throw new IvyException("Error: unknown output format " + ivy.outputFormat);
-            };
-            String name = Path.of(ts.filepath).getFileName().toString();
+            Tests result = tests.withSuites(List.of(suite));
+            String name = Path.of(suite.filepath).getFileName().toString();
             int dot = name.lastIndexOf('.');
             String base = dot < 0 ? name : name.substring(0, dot);
-            Path file = dir.resolve("test_results_" + base + "." + ivy.outputFormat);
-            writeFile(file, data);
+            String extension = ivy.outputFormat.equals("cucumber") ? "cucumber.json" : ivy.outputFormat;
+            Path file = dir.resolve("test_results_" + base + "." + extension);
+            try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+                switch (ivy.outputFormat) {
+                    case "json" -> Json.write(result.toJson(), options, out, hide);
+                    case "tap" -> out.write(hide.apply(tap(result)));
+                    case "yml", "yaml" -> {
+                        StringBuilder json = new StringBuilder();
+                        Json.write(result.toJson(), Json.GO.withMaxString(ivy.reportMaxValue), json, hide);
+                        out.write(Yaml.dump(Json.parse(json.toString())));
+                    }
+                    case "xml" -> out.write(hide.apply(xml(result, ivy.verbose)));
+                    case "cucumber" -> out.write(hide.apply(CucumberReport.write(result)));
+                    case "html" -> throw new IvyException("Error: you have to use the --html-report flag");
+                    default -> throw new IvyException("Error: unknown output format " + ivy.outputFormat);
+                }
+            } catch (IOException | UncheckedIOException e) {
+                throw new IvyException("Error while creating file " + file + ": " + e.getMessage(), e);
+            }
             ivy.print("Writing file " + file + "\n");
         }
         if (ivy.htmlReport) {
             Path file = dir.resolve(uniqueFilename(dir, "test_results.html"));
             ivy.print("Writing html file " + file + "\n");
-            writeFile(file, html(tests.withSuites(cleaned)));
-        }
-    }
-
-    private static void writeFile(Path file, String data) throws IvyException {
-        try {
-            Files.writeString(file, data, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new IvyException("Error while creating file " + file + ": " + e.getMessage(), e);
+            try (Writer out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+                html(tests, out, options.withIndent(" "), hide);
+            } catch (IOException | UncheckedIOException e) {
+                throw new IvyException("Error while creating file " + file + ": " + e.getMessage(), e);
+            }
         }
     }
 
@@ -90,39 +96,6 @@ public final class Outputs {
                 return candidate;
             }
         }
-    }
-
-    /** venom's {@code CleanUpSecrets}: a copy of the suite with secrets hidden. */
-    static TestSuite cleanUpSecrets(Ivy ivy, TestSuite suite) {
-        TestSuite ts = suite.copy();
-        List<String> suiteSecrets = ivy.computeSecrets(ts, null);
-        IvyLog.redactVars(ts.vars, ts.secrets, suiteSecrets);
-        for (TestCase tc : ts.testCases) {
-            List<String> secrets = ivy.computeSecrets(suite, tc);
-            IvyLog.redactVars(tc.vars, ts.secrets, secrets);
-            if (secrets.isEmpty()) {
-                continue;
-            }
-            for (TestStepResult r : tc.testStepResults) {
-                IvyLog.redactVars(r.computedVars, ts.secrets, secrets);
-                IvyLog.redactStringVars(r.inputVars, ts.secrets, secrets);
-                r.raw = hide(r.raw, secrets);
-                r.interpolated = hide(r.interpolated, secrets);
-                r.systemout = IvyLog.hideSensitive(r.systemout, secrets);
-                r.systemerr = IvyLog.hideSensitive(r.systemerr, secrets);
-                if (r.computedInfo != null) {
-                    r.computedInfo.replaceAll(i -> IvyLog.hideSensitive(i, secrets));
-                }
-            }
-        }
-        return ts;
-    }
-
-    private static byte[] hide(byte[] data, List<String> secrets) {
-        if (data == null) {
-            return null;
-        }
-        return IvyLog.hideSensitive(new String(data, StandardCharsets.UTF_8), secrets).getBytes(StandardCharsets.UTF_8);
     }
 
     // ------------------------------------------------------------ TAP
@@ -169,7 +142,7 @@ public final class Outputs {
 
     // ------------------------------------------------------------ JUnit XML
 
-    /** JUnit XML as venom writes it with Go's {@code encoding/xml}. */
+    /** JUnit XML, laid out as Go's {@code encoding/xml} writes it. */
     static String xml(Tests tests, int verbose) {
         StringBuilder sb = new StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?><testsuites>");
         for (TestSuite ts : tests.testSuites) {
@@ -203,9 +176,9 @@ public final class Outputs {
                 for (TestStepResult r : tc.testStepResults) {
                     failures.addAll(r.errorList());
                     if (r.hasErrors() || verbose > 1) {
-                        out.append(r.systemout.replace("\u0003", ""));
+                        out.append(r.stdout.replace("\u0003", ""));
                     }
-                    err.append(r.systemerr.replace("\u0003", ""));
+                    err.append(r.stderr.replace("\u0003", ""));
                 }
                 sb.append("\n    <testcase");
                 if (!ts.filename.isEmpty()) {
@@ -270,17 +243,36 @@ public final class Outputs {
 
     // ------------------------------------------------------------ HTML
 
-    static String html(Tests tests) throws IvyException {
+    private static final String PLACEHOLDER = "__IVY_REPORT_JSON__";
+
+    /** Writes the HTML report: the template with the results streamed in place of its placeholder. */
+    static void html(Tests tests, Writer out, Json.Options options, UnaryOperator<String> hide)
+            throws IvyException, IOException {
         String template;
         try (InputStream in = Outputs.class.getResourceAsStream("/xyz/fokion/ivy/core/output/report.html")) {
             if (in == null) {
                 throw new IvyException("the HTML report template is missing");
             }
             template = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new IvyException("unable to make template: " + e.getMessage(), e);
         }
-        Map<String, Object> json = new LinkedHashMap<>(tests.toJson());
-        return template.replace("__IVY_REPORT_JSON__", Json.write(json, Json.GO_INDENT.withIndent(" ")));
+        int at = template.indexOf(PLACEHOLDER);
+        if (at < 0) {
+            throw new IvyException("the HTML report template has no " + PLACEHOLDER);
+        }
+        out.write(template, 0, at);
+        // escaping < > & keeps the data inside its <script> element
+        Json.write(tests.toJson(), options, out, hide);
+        out.write(template, at + PLACEHOLDER.length(), template.length() - at - PLACEHOLDER.length());
+    }
+
+    /** The HTML report as a string. */
+    static String html(Tests tests) throws IvyException {
+        java.io.StringWriter out = new java.io.StringWriter();
+        try {
+            html(tests, out, Json.GO_INDENT.withIndent(" "), UnaryOperator.identity());
+        } catch (IOException e) {
+            throw new IvyException(e.getMessage(), e);
+        }
+        return out.toString();
     }
 }

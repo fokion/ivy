@@ -1,0 +1,26 @@
+# runs ivy on failing suites and checks what it prints and reports
+name: console output of failing runs
+testcases:
+- name: must assertion
+  steps:
+  - script: IS_TTY=false ./ivy run -v --output-dir=out-must failing/must.yml
+    assertions:
+    - result.exitCode == 2
+    - result.stdout contains "must1 FAIL"
+    - "result.stdout contains 'assertion failed: result.stdout == \"b\"'"
+    - "result.stdout contains '  result.stdout = \"a\"'"
+    - result.stdout contains "a required assertion failed, the remaining steps are skipped"
+    - result.stdout contains "1 other step was skipped"
+- name: retries
+  steps:
+  - script: IS_TTY=false ./ivy run --output-dir=out-retry failing/retry.yml
+    assertions:
+    - result.exitCode == 2
+    - result.stdout contains "It's a failure after 3 attempts"
+    - result.stdout contains 'retryIf result.stdout == "temporary" is false, 5 remaining retries skipped'
+- name: user executor failures in JUnit
+  steps:
+  - script: IS_TTY=false ./ivy run --output-dir=out-ux --lib-dir=failing/lib failing/user_executor.yml; cat out-ux/test_results_user_executor.xml
+    assertions:
+    - result.stdout contains "<error>"
+    - result.stdout contains "inner failure"

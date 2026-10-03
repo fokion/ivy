@@ -43,6 +43,12 @@ public final class ConnectorServer implements AutoCloseable {
 
     private static final Logger LOG = Logger.getLogger(ConnectorServer.class.getName());
 
+    /** Time allowed to authenticate after connecting. */
+    static final int HANDSHAKE_TIMEOUT_MILLIS = 10_000;
+
+    /** Connections served at the same time; more are closed right away. */
+    static final int MAX_CONNECTIONS = 64;
+
     private final ConnectorInfoManager connectors;
     private final byte[] key;
     private final ServerSocket serverSocket;
@@ -73,7 +79,13 @@ public final class ConnectorServer implements AutoCloseable {
         while (!serverSocket.isClosed()) {
             try {
                 Socket s = serverSocket.accept();
+                if (clients.size() >= MAX_CONNECTIONS) {
+                    LOG.warning("too many connections, closing " + s.getRemoteSocketAddress());
+                    s.close();
+                    continue;
+                }
                 s.setTcpNoDelay(true);
+                s.setSoTimeout(HANDSHAKE_TIMEOUT_MILLIS);
                 clients.add(s);
                 Thread.ofVirtual().name("ivy-connector-client").start(() -> serve(s));
             } catch (SocketException e) {
@@ -91,32 +103,39 @@ public final class ConnectorServer implements AutoCloseable {
              DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
              DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()))) {
             while (true) {
-                Map<String, Object> req = Frames.read(in);
+                Map<String, Object> req = Frames.read(in, authenticated ? Frames.MAX_FRAME : Frames.MAX_HANDSHAKE_FRAME);
                 if (req == null) {
                     return;
                 }
                 Map<String, Object> resp;
                 String op = Cast.toString(req.get("op"));
-                if (!authenticated && !op.equals("HELLO")) {
-                    resp = error("HELLO expected");
-                } else {
-                    resp = switch (op) {
-                        case "HELLO" -> {
-                            Map<String, Object> r = hello(req);
-                            authenticated = Cast.toBool(r.get("ok"));
-                            yield r;
-                        }
-                        case "OPEN" -> open(req, sessions);
-                        case "RUN" -> run(req, sessions);
-                        case "CLOSE" -> close(req, sessions);
-                        default -> error("unknown operation \"" + op + "\"");
-                    };
+                try {
+                    if (!authenticated && !op.equals("HELLO")) {
+                        resp = error("HELLO expected");
+                    } else {
+                        resp = switch (op) {
+                            case "HELLO" -> {
+                                Map<String, Object> r = hello(req);
+                                authenticated = Cast.toBool(r.get("ok"));
+                                yield r;
+                            }
+                            case "OPEN" -> open(req, sessions);
+                            case "RUN" -> run(req, sessions);
+                            case "CLOSE" -> close(req, sessions);
+                            default -> error("unknown operation \"" + op + "\"");
+                        };
+                    }
+                } catch (RuntimeException | StackOverflowError e) {
+                    LOG.log(Level.WARNING, "request " + op + " failed", e);
+                    resp = error(message(e));
                 }
                 resp.put("id", req.get("id"));
                 Frames.write(out, resp);
                 if (!authenticated) {
                     return;
                 }
+                // sessions may run long steps: no read timeout once authenticated
+                socket.setSoTimeout(0);
             }
         } catch (IOException e) {
             LOG.log(Level.FINE, "connection ended", e);
@@ -217,8 +236,7 @@ public final class ConnectorServer implements AutoCloseable {
     }
 
     private static RecordingContext context(Map<String, Object> req) {
-        Map<String, String> vars = new LinkedHashMap<>();
-        Cast.toStringMap(req.get("vars")).forEach((k, v) -> vars.put(k, Cast.toString(v)));
+        Map<String, Object> vars = new LinkedHashMap<>(Cast.toStringMap(WireCodec.decode(req.get("vars"))));
         @SuppressWarnings("unchecked")
         Map<String, Object> step = WireCodec.decode(req.get("step")) instanceof Map<?, ?> m
                 ? (Map<String, Object>) m : Map.of();
@@ -227,17 +245,17 @@ public final class ConnectorServer implements AutoCloseable {
 
     /** A step context whose log lines are sent back to the client. */
     private static final class RecordingContext implements StepContext {
-        private final Map<String, String> vars;
+        private final Map<String, Object> vars;
         private final Map<String, Object> step;
         final List<Object> logs = new ArrayList<>();
 
-        RecordingContext(Map<String, String> vars, Map<String, Object> step) {
+        RecordingContext(Map<String, Object> vars, Map<String, Object> step) {
             this.vars = Collections.unmodifiableMap(vars);
             this.step = Collections.unmodifiableMap(step);
         }
 
         @Override
-        public Map<String, String> vars() {
+        public Map<String, Object> vars() {
             return vars;
         }
 

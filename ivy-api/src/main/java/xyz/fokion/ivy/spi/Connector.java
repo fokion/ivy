@@ -24,4 +24,24 @@ public interface Connector<C extends Configuration> {
     /** Called when the test case ends. */
     default void close() throws Exception {
     }
+
+    /**
+     * The fields of the result, each with a one-line description, such as {@code status} for an
+     * HTTP response; validation warns about assertions reading other fields. Empty when unknown.
+     */
+    default java.util.Map<String, String> resultFields() {
+        return java.util.Map.of();
+    }
+
+    /** Result fields in order, from names and descriptions: {@code fields("status", "the HTTP status", ...)}. */
+    static java.util.Map<String, String> fields(String... namesAndDescriptions) {
+        if (namesAndDescriptions.length % 2 != 0) {
+            throw new IllegalArgumentException("fields takes names and descriptions in pairs");
+        }
+        java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < namesAndDescriptions.length; i += 2) {
+            m.put(namesAndDescriptions[i], namesAndDescriptions[i + 1]);
+        }
+        return java.util.Collections.unmodifiableMap(m);
+    }
 }

@@ -1,0 +1,13 @@
+# passes only when two suites browse at the same time: /meet waits for two requests
+name: meet
+testcases:
+- name: meet
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: ${base}/meet
+    - text: body
+      as: body
+    assertions:
+    - result.values.body == "met"

@@ -9,8 +9,8 @@ import java.util.Map;
 public final class AssertionsApplied {
     public boolean ok;
     public final List<Failure> errors = new ArrayList<>();
-    public String systemout = "";
-    public String systemerr = "";
+    public String stdout = "";
+    public String stderr = "";
     public final List<Applied> assertions = new ArrayList<>();
 
     public record Applied(Object assertion, boolean isOK) {

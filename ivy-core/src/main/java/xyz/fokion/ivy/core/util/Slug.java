@@ -3,7 +3,7 @@ package xyz.fokion.ivy.core.util;
 import java.text.Normalizer;
 
 /**
- * venom's test case slugs ({@code gosimple/slug} with case preserved): "&amp;" becomes "and",
+ * Test case slugs ({@code gosimple/slug} with case preserved): "&amp;" becomes "and",
  * "@" "at", accents are removed and other characters become dashes.
  * <p>
  * Unlike unidecode, scripts without a Latin decomposition are not transliterated.

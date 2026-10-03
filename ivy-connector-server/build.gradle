@@ -8,6 +8,8 @@ dependencies {
 
 application {
     mainClass = 'xyz.fokion.ivy.server.ConnectorServerMain'
+    // bundled JDBC drivers (SQLite) load native code
+    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
 }
 
 // the integration tests load the sql connector bundle

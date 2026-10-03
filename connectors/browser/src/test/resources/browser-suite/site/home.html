@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><title>Home</title></head>
+<body>
+<div class="welcome"></div>
+<a id="home-link" href="/login.html">sign out</a>
+<script>
+  // shown a moment later, so that waitFor has something to wait for
+  setTimeout(() => {
+    document.querySelector('.welcome').textContent = 'Hello ' + new URLSearchParams(location.search).get('user');
+  }, 200);
+</script>
+</body></html>

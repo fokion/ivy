@@ -11,3 +11,11 @@ dependencies {
 test {
     systemProperty "java.util.logging.manager", "org.jboss.logmanager.LogManager"
 }
+
+// the syntax documents served by `ivy mcp` (describe_syntax)
+processResources {
+    from(rootProject.file('docs')) {
+        include 'expressions.md', 'secrets.md'
+        into 'xyz/fokion/ivy/cli/docs'
+    }
+}

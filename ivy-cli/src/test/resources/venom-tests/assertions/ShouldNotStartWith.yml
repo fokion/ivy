@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldNotStartWith
-  steps:
-  - script: echo 'foo'
-    assertions:
-    - result.systemout ShouldNotStartWith coo

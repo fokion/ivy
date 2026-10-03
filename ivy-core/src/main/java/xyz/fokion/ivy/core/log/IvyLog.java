@@ -4,21 +4,21 @@ import java.io.PrintWriter;
 import java.io.Writer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-
-import xyz.fokion.ivy.spi.util.GoFormat;
 
 /**
- * The run log ({@code ivy.log}), formatted like venom's nested logrus output:
+ * The run log ({@code ivy.log}), formatted like logrus' nested formatter:
  * {@code Oct  2 21:46:33.794 [INFO] [suite] [testcase] [executor] message}.
  * <p>
- * Known secret values are replaced by {@code __hidden__} in every message.
+ * Known secret values are replaced by {@code __hidden__} in every message (see {@link Secrets}).
+ * <p>
+ * Lines are held until {@link #flush()}. Each suite logs into its own {@link #buffer()}, so the
+ * suites that run at the same time never write each other's lines:
+ * <pre>
+ *  suite A: buffer() ── lines ── flush() at the end of each test case ─┐
+ *                                                                      ├─► writer (one lock,
+ *  suite B: buffer() ── lines ── flush() at the end of each test case ─┘   a block at a time)
+ * </pre>
  */
 public final class IvyLog {
 
@@ -33,23 +33,19 @@ public final class IvyLog {
     }
 
     /** Logging fields of the current position in the run. */
-    public record Fields(String testsuite, String testcase, String step, String executor, List<String> secrets) {
-        public static final Fields EMPTY = new Fields(null, null, null, null, List.of());
+    public record Fields(String testsuite, String testcase, String step, String executor) {
+        public static final Fields EMPTY = new Fields(null, null, null, null);
 
         public Fields withTestsuite(String name) {
-            return new Fields(name, testcase, step, executor, secrets);
+            return new Fields(name, testcase, step, executor);
         }
 
         public Fields withTestcase(String name) {
-            return new Fields(testsuite, name, step, executor, secrets);
+            return new Fields(testsuite, name, step, executor);
         }
 
         public Fields withExecutor(String name) {
-            return new Fields(testsuite, testcase, step, name, secrets);
-        }
-
-        public Fields withSecrets(List<String> s) {
-            return new Fields(testsuite, testcase, step, executor, s);
+            return new Fields(testsuite, testcase, step, name);
         }
     }
 
@@ -57,15 +53,30 @@ public final class IvyLog {
 
     private final PrintWriter out;
     private final Level threshold;
+    private final Secrets secrets;
+    /** Shared by a log and its buffers: guards the writer and every pending list. */
+    private final Object lock;
+    private final java.util.List<String> pending = new java.util.ArrayList<>();
 
-    public IvyLog(Writer out, Level threshold) {
-        this.out = out == null ? null : new PrintWriter(out, true);
+    public IvyLog(Writer out, Level threshold, Secrets secrets) {
+        this(out == null ? null : new PrintWriter(out, true), threshold, secrets, new Object());
+    }
+
+    private IvyLog(PrintWriter out, Level threshold, Secrets secrets, Object lock) {
+        this.out = out;
         this.threshold = threshold;
+        this.secrets = secrets;
+        this.lock = lock;
+    }
+
+    /** A log with pending lines of its own, written to the same file. */
+    public IvyLog buffer() {
+        return new IvyLog(out, threshold, secrets, lock);
     }
 
     /** A log that discards everything. */
     public static IvyLog discard() {
-        return new IvyLog(null, Level.ERROR);
+        return new IvyLog(null, Level.ERROR, new Secrets());
     }
 
     public boolean enabled(Level level) {
@@ -83,9 +94,25 @@ public final class IvyLog {
                 sb.append('[').append(f).append("] ");
             }
         }
-        sb.append(replaceSecrets(message, fields.secrets()));
-        synchronized (this) {
-            out.println(sb);
+        sb.append(message);
+        synchronized (lock) {
+            pending.add(sb.toString());
+        }
+    }
+
+    /**
+     * Writes the pending lines of this log. Lines are held until the end of each test case, so that
+     * values a step captures as secrets are hidden in the lines written before the capture too.
+     */
+    public void flush() {
+        if (out == null) {
+            return;
+        }
+        synchronized (lock) {
+            for (String line : pending) {
+                out.println(secrets.hide(line));
+            }
+            pending.clear();
         }
     }
 
@@ -103,89 +130,5 @@ public final class IvyLog {
 
     public void error(Fields f, String message) {
         log(Level.ERROR, f, message);
-    }
-
-    /** venom's {@code HideSensitive}. */
-    public static String hideSensitive(Object arg, List<String> secrets) {
-        String s = arg instanceof String str ? str : GoFormat.sprint(arg);
-        if (secrets == null || secrets.isEmpty()) {
-            return s;
-        }
-        return replaceSecrets(s, secrets);
-    }
-
-    /** Replaces the longest secrets first. */
-    public static String replaceSecrets(String s, List<String> secrets) {
-        if (secrets == null || secrets.isEmpty() || s == null) {
-            return s;
-        }
-        List<String> sorted = new ArrayList<>(secrets);
-        sorted.sort(Comparator.comparingInt(String::length).reversed());
-        for (String secret : sorted) {
-            if (!secret.isEmpty()) {
-                s = s.replace(secret, "__hidden__");
-            }
-        }
-        return s;
-    }
-
-    /**
-     * Adds the base64 encodings of the secret variables and, when {@code basic_auth_password}
-     * is secret, of the basic auth token.
-     */
-    public static void appendDerivedSecrets(List<String> secrets, Set<String> seen, Map<String, Object> vars,
-            List<String> secretKeys) {
-        for (String key : secretKeys) {
-            String val = GoFormat.sprint(vars.get(key));
-            if (!val.isEmpty() && !val.equals("<nil>")) {
-                add(secrets, seen, Base64.getEncoder().encodeToString(val.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            }
-        }
-        if (secretKeys.contains("basic_auth_password")) {
-            String user = GoFormat.sprint(vars.get("basic_auth_user"));
-            String pass = GoFormat.sprint(vars.get("basic_auth_password"));
-            if (!pass.isEmpty() && !pass.equals("<nil>")) {
-                add(secrets, seen, Base64.getEncoder().encodeToString((user + ":" + pass)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            }
-        }
-    }
-
-    private static void add(List<String> secrets, Set<String> seen, String value) {
-        if (!value.isEmpty() && seen.add(value)) {
-            secrets.add(value);
-        }
-    }
-
-    /** Hides secret variables of a map in place: secret keys entirely, other values by content. */
-    public static void redactVars(Map<String, Object> vars, List<String> secretKeys, List<String> secrets) {
-        if (vars == null || vars.isEmpty() || secretKeys.isEmpty()) {
-            return;
-        }
-        vars.replaceAll((k, v) -> {
-            if (k.startsWith("venom.")) {
-                return v;
-            }
-            if (secretKeys.contains(k)) {
-                return "__hidden__";
-            }
-            return hideSensitive(v, secrets);
-        });
-    }
-
-    /** {@link #redactVars} for string maps. */
-    public static void redactStringVars(Map<String, String> vars, List<String> secretKeys, List<String> secrets) {
-        if (vars == null || vars.isEmpty() || secretKeys.isEmpty()) {
-            return;
-        }
-        vars.replaceAll((k, v) -> {
-            if (k.startsWith("venom.")) {
-                return v;
-            }
-            if (secretKeys.contains(k)) {
-                return "__hidden__";
-            }
-            return hideSensitive(v, secrets);
-        });
     }
 }

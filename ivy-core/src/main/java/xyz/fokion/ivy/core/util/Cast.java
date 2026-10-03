@@ -15,7 +15,7 @@ import xyz.fokion.ivy.spi.util.GoFormat;
 import xyz.fokion.ivy.spi.util.Json;
 
 /**
- * Loose conversions with the semantics of Go's {@code spf13/cast}, which venom relies on.
+ * Loose conversions with the semantics of Go's {@code spf13/cast}, which suites rely on.
  */
 public final class Cast {
 

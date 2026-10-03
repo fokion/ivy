@@ -1,6 +1,8 @@
 package xyz.fokion.ivy.core.connectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,11 +24,13 @@ import org.junit.jupiter.api.io.TempDir;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import xyz.fokion.ivy.core.dump.Dump;
+import xyz.fokion.ivy.core.expr.Expression;
+import xyz.fokion.ivy.core.expr.Scope;
 import xyz.fokion.ivy.spi.ConnectorException;
 import xyz.fokion.ivy.spi.Struct;
+import xyz.fokion.ivy.spi.util.LazyJson;
 
-/** Ported from venom's executors/http/http_test.go. */
+/** The http connector against a local server. */
 class HttpConnectorTest {
 
     private HttpServer server;
@@ -54,7 +58,7 @@ class HttpConnectorTest {
     }
 
     private Struct run(Map<String, Object> step) throws Exception {
-        return (Struct) TestContext.run(HttpConnector.class, TestContext.of(step));
+        return (Struct) TestContext.run(TestContext.of(step));
     }
 
     @Test
@@ -71,7 +75,7 @@ class HttpConnectorTest {
             respond(ex, cookie != null && cookie.contains("some-cookie=some-value") ? 200 : 400, "");
         });
         Struct result = run(Map.of("method", "GET", "url", url, "path", "/set"));
-        assertEquals(200L, result.get("statuscode"));
+        assertEquals(200L, result.get("status"));
         assertEquals(1, calls.get());
     }
 
@@ -87,7 +91,7 @@ class HttpConnectorTest {
         Struct result = run(Map.of("url", url, "path", "/allow"));
         @SuppressWarnings("unchecked")
         Map<String, String> headers = (Map<String, String>) result.get("headers");
-        assertEquals("GET, POST, HEAD, OPTIONS", headers.get("Allow"));
+        assertEquals("GET, POST, HEAD, OPTIONS", headers.get("allow"));
     }
 
     @Test
@@ -97,11 +101,16 @@ class HttpConnectorTest {
             respond(ex, 200, "{\"items\":[{\"name\":\"a\"}],\"count\":1}");
         });
         Struct result = run(Map.of("url", url + "/json", "headers", Map.of("x-custom", "1")));
-        Map<String, Object> dump = Dump.dump(result);
-        assertEquals("a", dump.get("result.bodyjson.items.items0.name"));
-        assertEquals(1L, dump.get("result.bodyjson.count"));
-        assertEquals(List.of("1"), dump.get("result.request.header.X-Custom"));
-        assertTrue(((String) result.get("systemout")).contains("Method:     GET"));
+        LazyJson body = (LazyJson) result.get("body");
+        assertFalse(body.isParsed(), "the body is parsed only when read");
+        Scope scope = Scope.of(Map.of("result", result));
+        assertEquals("a", Expression.compile("result.body.items[0].name").evaluate(scope));
+        assertTrue(body.isParsed());
+        Object parsed = body.value();
+        assertEquals(1L, Expression.compile("result.body.count").evaluate(scope));
+        assertSame(parsed, body.value(), "the body is parsed once");
+        assertEquals("1", Expression.compile("result.request.headers['x-custom']").evaluate(scope));
+        assertEquals("{\"items\":[{\"name\":\"a\"}],\"count\":1}", result.get("bodyText"));
     }
 
     @Test
@@ -116,11 +125,11 @@ class HttpConnectorTest {
         Struct result = run(Map.of("method", "POST", "url", url + "/post", "body", "{\"a\":1}",
                 "basic_auth_user", "u", "basic_auth_password", "p",
                 "query_parameters", Map.of("b", "2", "a", "x y")));
-        assertEquals(201L, result.get("statuscode"));
+        assertEquals(201L, result.get("status"));
         assertEquals("{\"a\":1}", received.get());
         assertEquals("Basic dTpw", auth.get());
         assertEquals("created", result.get("body"));
-        assertEquals(url + "/post?a=x+y&b=2", ((Struct) result.get("request")).get("url"));
+        assertEquals(url + "/post?a=x+y&b=2", ((Map<?, ?>) result.get("request")).get("url"));
     }
 
     private Path workdir() throws Exception {
@@ -135,20 +144,19 @@ class HttpConnectorTest {
             respond(ex, 200, "");
         });
         TestContext ctx = TestContext.of(Map.of("method", "POST", "url", url, "bodyfile", "bodyfile_with_interpolation"))
-                .withVar("venom.testsuite.workdir", workdir().toString())
-                .withVar("fullName", "{{.name}} test")
-                .withVar("name", "123");
-        TestContext.run(HttpConnector.class, ctx);
+                .withVar("ivy.suite.workdir", workdir().toString())
+                .withVar("fullName", "123 test");
+        TestContext.run(ctx);
         assertEquals("{\n    \"key\": \"123 test\"\n}", received.get());
     }
 
     @Test
     void reportsUnresolvedBodyFileVariables() throws Exception {
         TestContext ctx = TestContext.of(Map.of("url", url, "bodyfile", "bodyfile_with_interpolation"))
-                .withVar("venom.testsuite.workdir", workdir().toString())
-                .withVar("fullName", "{{.name}} test");
-        ConnectorException e = assertThrows(ConnectorException.class, () -> TestContext.run(HttpConnector.class, ctx));
-        assertEquals("unable to interpolate file due to unresolved variables {{.name}}", e.getMessage());
+                .withVar("ivy.suite.workdir", workdir().toString());
+        ConnectorException e = assertThrows(ConnectorException.class, () -> TestContext.run(ctx));
+        assertTrue(e.getMessage().startsWith("unable to render file "), e.getMessage());
+        assertTrue(e.getMessage().contains("unknown variable fullName"), e.getMessage());
     }
 
     @Test
@@ -182,5 +190,65 @@ class HttpConnectorTest {
         assertEquals("X-Ovh-Queryid", HttpConnector.canonicalHeaderKey("x-ovh-queryid"));
         byte[] root = Files.readAllBytes(workdir().resolve("digicert-root-ca.crt"));
         Tls.context(false, root, null, null, null);
+    }
+
+    @Test
+    void redirectsLikeGo() throws Exception {
+        AtomicReference<String> seen = new AtomicReference<>();
+        server.createContext("/see-other", ex -> {
+            ex.getResponseHeaders().add("Location", "/target");
+            respond(ex, 303, "");
+        });
+        server.createContext("/temporary", ex -> {
+            ex.getResponseHeaders().add("Location", "/target");
+            respond(ex, 307, "");
+        });
+        server.createContext("/target", ex -> {
+            seen.set(ex.getRequestMethod() + " " + new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(ex, 200, "");
+        });
+        server.createContext("/loop", ex -> {
+            ex.getResponseHeaders().add("Location", "/loop");
+            respond(ex, 302, "");
+        });
+        run(Map.of("method", "POST", "url", url + "/see-other", "body", "payload"));
+        assertEquals("GET ", seen.get());
+        run(Map.of("method", "POST", "url", url + "/temporary", "body", "payload"));
+        assertEquals("POST payload", seen.get());
+        assertEquals(302L, run(Map.of("url", url + "/loop", "no_follow_redirect", true)).get("status"));
+        ConnectorException e = assertThrows(ConnectorException.class, () -> run(Map.of("url", url + "/loop")));
+        assertTrue(e.getMessage().endsWith("stopped after 10 redirects"), e.getMessage());
+    }
+
+    @Test
+    void dropsCredentialsOnRedirectsToOtherHosts() throws Exception {
+        AtomicReference<String> auth = new AtomicReference<>();
+        String otherHost = "http://localhost:" + server.getAddress().getPort();
+        server.createContext("/away", ex -> {
+            ex.getResponseHeaders().add("Location", otherHost + "/whoami");
+            respond(ex, 302, "");
+        });
+        server.createContext("/whoami", ex -> {
+            auth.set(String.valueOf(ex.getRequestHeaders().getFirst("Authorization")));
+            respond(ex, 200, "");
+        });
+        run(Map.of("url", url + "/away", "basic_auth_user", "u", "basic_auth_password", "p"));
+        assertEquals("null", auth.get());
+    }
+
+    @Test
+    void scopesCookies() {
+        assertTrue(CookieJar.domainMatches("api.example.com", "example.com"));
+        assertFalse(CookieJar.domainMatches("example.com", "api.example.com"));
+        assertFalse(CookieJar.domainMatches("evil.com", "bank.com"));
+        assertTrue(CookieJar.pathMatches("/foo/bar", "/foo"));
+        assertFalse(CookieJar.pathMatches("/foobar", "/foo"));
+    }
+
+    @Test
+    void resolveKeepsTheRawUrl() throws Exception {
+        java.net.URI uri = new java.net.URI("https://api.example.com/a%2Fb?q=x%26y");
+        assertEquals("https://127.0.0.1/a%2Fb?q=x%26y",
+                HttpConnector.target(uri, List.of("api.example.com:443:127.0.0.1")).uri().toString());
     }
 }

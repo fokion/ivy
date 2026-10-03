@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldNotContainSubstring
-  steps:
-  - script: echo 'foo bar foo'
-    assertions:
-    - result.systemout ShouldNotContainSubstring car

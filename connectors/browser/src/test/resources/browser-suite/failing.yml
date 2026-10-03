@@ -1,0 +1,29 @@
+# failures: a missing element, a step timeout, and a test case that still runs after them
+name: failing
+testcases:
+- name: missing button
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actionTimeout: 1000
+    actions:
+    - goto: ${base}/login.html
+    - click: "#no-such-button"
+- name: step timeout
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    timeout: 2
+    actions:
+    - goto: ${base}/login.html
+    - waitFor: ".never"
+- name: still works
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: ${base}/login.html
+    - text: "h1"
+      as: heading
+    assertions:
+    - result.values.heading == "Login"

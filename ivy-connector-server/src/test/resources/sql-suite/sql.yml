@@ -1,4 +1,4 @@
-# venom's tests/sql.yml, plus file and DDL steps
+# sql connector suite: a SQLite file and in-memory DDL
 name: sql integration testsuite
 
 testcases:
@@ -10,8 +10,8 @@ testcases:
      commands:
        - "SELECT * FROM test_table;"
      assertions:
-       - result.queries.__Len__ ShouldEqual 1
-       - result.queries.queries0.rows.rows0.name ShouldEqual test row 1
+       - result.queries.length == 1
+       - result.queries[0].rows[0].name == "test row 1"
 
 - name: test-sqlite-memory
   steps:
@@ -23,7 +23,7 @@ testcases:
        - "INSERT INTO t VALUES (1, 'one'), (2, 'two')"
        - "SELECT id, label FROM t ORDER BY id"
      assertions:
-       - result.queries.__Len__ ShouldEqual 3
-       - result.queries.queries2.rows.__Len__ ShouldEqual 2
-       - result.queries.queries2.rows.rows1.id ShouldEqual 2
-       - result.queries.queries2.rows.rows1.label ShouldEqual two
+       - result.queries.length == 3
+       - result.queries[2].rows.length == 2
+       - result.queries[2].rows[1].id == 2
+       - result.queries[2].rows[1].label == "two"

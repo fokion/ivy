@@ -4,3 +4,9 @@ dependencies {
     bundled 'org.postgresql:postgresql:42.7.13'
     bundled 'com.mysql:mysql-connector-j:9.7.0'
 }
+
+dependencies {
+    // fixtures are YAML
+    bundled "org.snakeyaml:snakeyaml-engine:${snakeyamlEngineVersion}"
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
+}

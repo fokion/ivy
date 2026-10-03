@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Ports of the Go standard library string functions whose exact behaviour venom depends on.
+ * Ports of the Go standard library string functions whose exact behaviour suites depend on.
  */
 public final class GoStrings {
 
@@ -92,7 +92,7 @@ public final class GoStrings {
         }
     }
 
-    /** {@code strconv.Quote} without the surrounding quotes, as venom's {@code escapeQuotes}. */
+    /** {@code strconv.Quote} without the surrounding quotes, to embed a value in a JSON string. */
     public static String quoteInner(String s) {
         String q = xyz.fokion.ivy.spi.util.GoFormat.quote(s);
         return q.substring(1, q.length() - 1);
@@ -256,7 +256,7 @@ public final class GoStrings {
     }
 
     /**
-     * venom's {@code RemoveNotPrintableChar}: replaces runes that are neither printable, spaces
+     * Replaces runes that are neither printable, spaces
      * nor punctuation with a space.
      */
     public static String removeNotPrintable(String in) {
@@ -271,5 +271,13 @@ public final class GoStrings {
             sb.appendCodePoint(xyz.fokion.ivy.spi.util.GoFormat.isPrint(c) || isSpace(c) || punct ? c : ' ');
         });
         return sb.toString();
+    }
+
+    /**
+     * Compiles a Go (RE2) regular expression: named groups written {@code (?P<name>...)} are
+     * accepted. Java-only constructs are not rejected.
+     */
+    public static java.util.regex.Pattern compileRegex(String re2) {
+        return java.util.regex.Pattern.compile(re2.replace("(?P<", "(?<"));
     }
 }

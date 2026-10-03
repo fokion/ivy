@@ -1,0 +1,21 @@
+{
+  "name": "ivy-report",
+  "private": true,
+  "version": "0.0.1",
+  "description": "The HTML report of ivy runs: a single offline file, built with Vite and Tailwind CSS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "check": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^5.0.3"
+  }
+}

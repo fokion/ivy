@@ -1,0 +1,7 @@
+executor: list_people
+steps:
+- script: echo '[{"name":"a"},{"name":"b"}]'
+  set:
+    people: result.json
+output:
+  people: ${people}

@@ -28,7 +28,7 @@ import xyz.fokion.ivy.spi.util.GoFormat;
 import xyz.fokion.ivy.spi.util.Json;
 
 /**
- * YAML handling equivalent to venom's {@code rockbears/yaml} (YAML 1.2 core schema, converted
+ * YAML handling (YAML 1.2 core schema, converted
  * to JSON-compatible values): maps have string keys, numbers are {@code Long} or
  * {@code Double}.
  */
@@ -85,10 +85,10 @@ public final class Yaml {
 
     private static String kind(Object v) {
         return switch (v) {
-            case String s -> "string";
-            case List<?> l -> "array";
-            case Number n -> "number";
-            case Boolean b -> "bool";
+            case String _ -> "string";
+            case List<?> _ -> "array";
+            case Number _ -> "number";
+            case Boolean _ -> "bool";
             default -> v.getClass().getSimpleName();
         };
     }
@@ -177,7 +177,7 @@ public final class Yaml {
         public static final TestCaseLines EMPTY = new TestCaseLines(0, List.of(), List.of());
     }
 
-    /** venom's {@code extractLineNumbers}; returns an empty list when the YAML cannot be parsed. */
+    /** Line numbers of test cases, steps and assertions; returns an empty list when the YAML cannot be parsed. */
     public static List<TestCaseLines> lineNumbers(String content) {
         Optional<Node> root;
         try {

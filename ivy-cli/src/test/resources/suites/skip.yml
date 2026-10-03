@@ -1,0 +1,16 @@
+name: skip
+vars:
+  enabled: false
+testcases:
+- name: skipped test case
+  if: enabled
+  steps:
+  - script: exit 1
+- name: skipped step
+  steps:
+  - script: exit 1
+    if: enabled
+  - script: echo runs
+    if: "!enabled && ivy.step.number == 2"
+    assertions:
+    - result.stdout == "runs"

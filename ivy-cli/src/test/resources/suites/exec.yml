@@ -1,0 +1,35 @@
+name: exec
+testcases:
+- name: script
+  steps:
+  - script: echo hello
+    assertions:
+    - result.exitCode == 0
+    - result.stdout == "hello"
+- name: command and stdin
+  steps:
+  - command: ["printf", "%s-%s", "a", "b"]
+    assertions:
+    - result.stdout == "a-b"
+  - stdin: '{"name":"ivy","tags":["x","y"]}'
+    script: cat
+    assertions:
+    - result.json.name == "ivy"
+    - result.json.tags contains "y"
+    - result.json.tags.length == 2
+- name: exit codes and stderr
+  steps:
+  - script: echo oops >&2; exit 3
+    assertions:
+    - result.exitCode == 3
+    - result.stderr == "oops"
+- name: interpreter and working directory
+  steps:
+  - script: |
+      #!/bin/sh
+      ls data/numbers.json
+    assertions:
+    - result.stdout == "data/numbers.json"
+- name: default assertion
+  steps:
+  - script: "true"

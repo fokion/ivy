@@ -18,6 +18,9 @@ public final class Frames {
     /** Larger messages are refused, to bound memory on bad input. */
     public static final int MAX_FRAME = 64 * 1024 * 1024;
 
+    /** The largest message accepted before the peer authenticated. */
+    public static final int MAX_HANDSHAKE_FRAME = 64 * 1024;
+
     private Frames() {
     }
 
@@ -29,20 +32,30 @@ public final class Frames {
     }
 
     /** Reads one message, or returns {@code null} at the end of the stream. */
-    @SuppressWarnings("unchecked")
     public static Map<String, Object> read(DataInputStream in) throws IOException {
+        return read(in, MAX_FRAME);
+    }
+
+    /** Reads one message of at most {@code maxLength} bytes, or returns {@code null} at the end of the stream. */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> read(DataInputStream in, int maxLength) throws IOException {
         int length;
         try {
             length = in.readInt();
         } catch (EOFException e) {
             return null;
         }
-        if (length < 0 || length > MAX_FRAME) {
+        if (length < 0 || length > maxLength) {
             throw new IOException("invalid frame length " + length);
         }
         byte[] bytes = new byte[length];
         in.readFully(bytes);
-        Object message = Json.parse(new String(bytes, StandardCharsets.UTF_8));
+        Object message;
+        try {
+            message = Json.parse(new String(bytes, StandardCharsets.UTF_8));
+        } catch (Json.JsonException e) {
+            throw new IOException("invalid frame: " + e.getMessage(), e);
+        }
         if (!(message instanceof Map<?, ?> m)) {
             throw new IOException("a frame must hold a JSON object");
         }

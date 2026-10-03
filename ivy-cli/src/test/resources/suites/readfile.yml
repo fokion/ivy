@@ -1,0 +1,24 @@
+name: readfile
+testcases:
+- name: json
+  steps:
+  - type: readfile
+    path: data/numbers.json
+    assertions:
+    - result.json.total == 6
+    - result.files[0].path == "data/numbers.json"
+    - result.files[0].size > 0
+- name: yaml
+  steps:
+  - type: readfile
+    path: data/config.yml
+    assertions:
+    - result.json.service.name == "api"
+    - result.json.service.replicas == 3
+- name: glob
+  steps:
+  - type: readfile
+    path: data/*.json
+    assertions:
+    - result.files.length == 1
+    - result.files[0].md5.length == 32

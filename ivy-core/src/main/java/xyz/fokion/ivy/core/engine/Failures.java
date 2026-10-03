@@ -10,23 +10,23 @@ final class Failures {
     private Failures() {
     }
 
-    /** venom's {@code newFailure}, with the source location of the step or assertion. */
+    /**
+     * A step failure, located at the step or assertion:
+     * {@code Testcase "name", step #2 (suite.yml:14): message}.
+     *
+     * @param rangedIndex the iteration of a ranged step, or -1
+     * @param assertionIndex the assertion, or -1
+     */
     static Failure newFailure(RunContext ctx, TestCase tc, int stepNumber, int rangedIndex, int assertionIndex,
             String assertion, String error) {
-        String filepath = ctx.var("venom.testsuite.filepath");
         // step numbers are 1-based, source lines are indexed from 0
         int line = tc.findSourceLine(stepNumber - 1, assertionIndex);
-        String value;
-        if (!assertion.isEmpty()) {
-            value = "Testcase " + GoFormat.quote(tc.originalName) + ", step #" + stepNumber + "-" + rangedIndex
-                    + ": Assertion " + GoFormat.quote(GoStrings.removeNotPrintable(assertion)) + " failed. "
-                    + GoStrings.removeNotPrintable(error) + " (" + filepath + ":" + line + ")";
-        } else {
-            value = "Testcase " + GoFormat.quote(tc.originalName) + ", step #" + stepNumber + "-" + rangedIndex
-                    + ": " + GoStrings.removeNotPrintable(error) + " (" + filepath + ":" + line + ")";
-        }
+        String step = rangedIndex >= 0 ? stepNumber + "-" + rangedIndex : Integer.toString(stepNumber);
+        String location = ctx.filepath().isEmpty() ? "" : " (" + ctx.filepath() + ":" + line + ")";
+        String value = "Testcase " + GoFormat.quote(tc.originalName) + ", step #" + step + location + ": "
+                + GoStrings.removeNotPrintable(error);
         Failure f = new Failure(value);
-        f.testcaseClassname = filepath;
+        f.testcaseClassname = ctx.filepath();
         f.testcaseName = tc.name;
         f.testcaseLineNumber = line;
         f.stepNumber = stepNumber;

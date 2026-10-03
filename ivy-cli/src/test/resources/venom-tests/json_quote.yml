@@ -1,7 +1,0 @@
-name: "parsing"
-testcases:
-  - name: "test"
-    steps:
-      - type: readfile
-        path: json_quote/file.json     
-      - script: echo {{.result.content}}

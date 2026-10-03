@@ -1,7 +1,0 @@
-name: Assertions testsuite
-testcases:
-- name: test assertion ShouldEqual
-  steps:
-  - script: echo 'foo'
-    assertions:
-    - result.code ShouldEqual 0

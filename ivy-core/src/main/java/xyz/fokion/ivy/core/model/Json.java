@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
-/** Helpers for the JSON shape of the model, which follows venom's Go struct tags. */
+/** Helpers for the JSON shape of the model, with Go-style field names. */
 final class Json {
 
     private static final OffsetDateTime ZERO = OffsetDateTime.of(1, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);

@@ -1,0 +1,40 @@
+name: assertions
+testcases:
+- name: comparisons
+  steps:
+  - script: cat data/numbers.json
+    assertions:
+    - result.json.total == 6
+    - result.json.total > 5
+    - between(result.json.total, 5, 7)
+    - result.json.values contains 2
+    - result.json.values.length == 3
+    - result.json.values == [1, 2, 3]
+    - "'values' in result.json"
+    - result.stdout contains "total"
+    - result.stdout.startsWith("{")
+    - result.stdout matches '"total":\s*6'
+    - result.json.missing == null
+    - result.json.values.every(v => v > 0) && result.json.values.some(v => v == 3)
+- name: operators
+  steps:
+  - script: echo 5
+    assertions:
+    - result.stdout == 5 && result.exitCode == 0
+    - result.stdout == 4 || result.stdout == 5
+    - "!(result.stdout == 6)"
+    - result.stdout != 6
+    - result.stdout % 2 == 1
+- name: dates
+  steps:
+  - script: date -u +%Y-%m-%dT%H:%M:%SZ
+    assertions:
+    - date(result.stdout) < now() + 24 * 3600 * 1000
+    - date(result.stdout) > now() - 5 * 60 * 1000
+- name: assertions on variables
+  steps:
+  - script: echo ok
+    set:
+      state: result.stdout
+  - assertions:
+    - state == "ok"

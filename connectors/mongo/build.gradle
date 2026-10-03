@@ -1,0 +1,7 @@
+// The mongo connector: actions on a MongoDB database.
+dependencies {
+    bundled 'org.mongodb:mongodb-driver-sync:5.13.0'
+    bundled "org.snakeyaml:snakeyaml-engine:${snakeyamlEngineVersion}"
+    bundled "org.slf4j:slf4j-nop:${slf4jVersion}"
+    testImplementation 'org.testcontainers:testcontainers-mongodb'
+}

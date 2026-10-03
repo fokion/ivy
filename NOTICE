@@ -1,5 +1,4 @@
-
-Behaviours ported from Go libraries used by venom:
+ivy reproduces the behaviour of these Go libraries:
 - template helpers from Masterminds/sprig (MIT), aokoli/goutils (Apache 2.0) and huandu/xstrings (MIT)
 - value flattening from fsamin/go-dump (Apache 2.0)
 - natural date parsing from tj/go-naturaldate (MIT)

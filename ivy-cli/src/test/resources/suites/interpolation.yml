@@ -1,0 +1,35 @@
+name: interpolation
+vars:
+  word: ivy
+  sentence: hello world
+  flag: true
+  path: /a/b/c.txt
+  user:
+    name: ada
+    roles: [admin, dev]
+testcases:
+- name: expressions in templates
+  steps:
+  - script: echo '${word.toUpperCase()} ${sentence.split(" ").length} ${base64(word)} ${missing ?? "dflt"}'
+    with:
+      missing: null
+    assertions:
+    - result.stdout == "IVY 2 aXZ5 dflt"
+  - script: |-
+      echo '${2 + 3} ${flag ? "yes" : "no"} ${path.split("/").at(-1)} ${sentence.replace(" ", "_")}'
+    assertions:
+    - result.stdout == "5 yes c.txt hello_world"
+  - script: echo '${user.roles.join(",")} ${user} ${user.roles.map(r => r.length)}'
+    assertions:
+    - result.stdout == 'admin,dev {"name":"ada","roles":["admin","dev"]} [5,3]'
+- name: escapes
+  steps:
+  - script: X=shell; echo "$${X} ${word}"
+    assertions:
+    - result.stdout == "shell ivy"
+- name: templates in assertions
+  steps:
+  - script: echo ${user.name}
+    assertions:
+    - result.stdout == ${user.name}
+    - result.stdout == user.name

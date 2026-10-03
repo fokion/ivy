@@ -1,0 +1,4 @@
+[
+  {"topic": "from-file", "key": "a", "value": "{\"n\": 1}"},
+  {"topic": "from-file", "key": "b", "value": "{\"n\": 2}"}
+]

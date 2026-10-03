@@ -26,7 +26,7 @@ public final class SqlConfiguration implements Configuration {
         return dsn;
     }
 
-    @ConfigurationProperty(required = true, secret = true, help = "a JDBC URL, or a venom (Go) DSN")
+    @ConfigurationProperty(required = true, secret = true, help = "a JDBC URL, or a Go driver DSN")
     public void setDsn(String dsn) {
         this.dsn = dsn;
     }

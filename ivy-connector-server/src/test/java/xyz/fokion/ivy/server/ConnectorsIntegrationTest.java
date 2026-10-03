@@ -89,7 +89,7 @@ class ConnectorsIntegrationTest {
         try (LocalConnectorInfoManager local = LocalConnectorInfoManager.fromBundles(bundles());
              ConnectorServer server = ConnectorServer.start(local, "127.0.0.1", 0, "s3cret", false)) {
             RemoteConnectorInfoManager remote = RemoteConnectorInfoManager.connect("s3cret@127.0.0.1:" + server.port());
-            assertEquals(List.of("sql"), remote.connectorInfos().stream().map(ConnectorInfo::type).toList());
+            assertEquals(List.of("sql", "dbfixtures"), remote.connectorInfos().stream().map(ConnectorInfo::type).toList());
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             assertEquals(Status.PASS, run(suite(dir), remote, out), out.toString(StandardCharsets.UTF_8));
 
@@ -162,6 +162,20 @@ class ConnectorsIntegrationTest {
     private static String read(URL url) throws IOException {
         try (var in = url.openStream()) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void refusesLargeFramesBeforeAuthentication() throws Exception {
+        try (LocalConnectorInfoManager local = LocalConnectorInfoManager.fromBundles(bundles());
+             ConnectorServer server = ConnectorServer.start(local, "127.0.0.1", 0, "k", false);
+             java.net.Socket s = new java.net.Socket("127.0.0.1", server.port())) {
+            s.setSoTimeout(5000);
+            java.io.DataOutputStream out = new java.io.DataOutputStream(s.getOutputStream());
+            out.writeInt(32 * 1024 * 1024);
+            out.flush();
+            // the server closes the connection instead of allocating the frame
+            assertEquals(-1, s.getInputStream().read());
         }
     }
 }

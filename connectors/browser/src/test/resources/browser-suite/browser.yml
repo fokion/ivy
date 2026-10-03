@@ -1,0 +1,53 @@
+# the browser connector against a Playwright server: login across steps, captures, cookies per test case
+name: browser
+secrets: [password]
+vars:
+  password: pa55-SECRET-word
+testcases:
+- name: login
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: ${base}/login.html
+    - fill: {selector: "#user", value: ada}
+    - fill: {selector: "#password", value: "${password}"}
+    - click: "button[type=submit]"
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - waitFor: {selector: ".welcome", state: visible, timeout: 5000}
+    - text: ".welcome"
+      as: welcome
+    - evaluate: "() => document.title"
+      as: title
+    - attribute: {selector: "#home-link", name: href}
+      as: link
+    - screenshot: shots/home.png
+    assertions:
+    - result.url contains "/home.html?user=ada"
+    - result.values.welcome == "Hello ada"
+    - result.values.title == "Home"
+    - result.values.link == "/login.html"
+    - result.title == "Home"
+    - result.screenshots.length == 1
+- name: set cookie
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: ${base}/cookie.html?set=1
+    - text: "#cookie"
+      as: cookie
+    assertions:
+    - result.values.cookie contains "session=1"
+- name: fresh context
+  steps:
+  - type: browser
+    wsEndpoint: ${pw_ws}
+    actions:
+    - goto: ${base}/cookie.html
+    - text: "#cookie"
+      as: cookie
+    assertions:
+    - result.values.cookie == ""

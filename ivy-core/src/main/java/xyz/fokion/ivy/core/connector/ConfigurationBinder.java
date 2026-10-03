@@ -4,12 +4,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 import xyz.fokion.ivy.core.connector.ConnectorInfo.PropertyInfo;
 import xyz.fokion.ivy.core.util.Cast;
@@ -20,7 +15,8 @@ import xyz.fokion.ivy.spi.util.GoFormat;
 
 /**
  * Binds step keys to a {@link Configuration} bean through its setters annotated with
- * {@link ConfigurationProperty}, matching names case-insensitively like venom's
+ * {@link ConfigurationProperty}, matching names case-insensitively and ignoring underscores, so
+ * {@code clientType}, {@code client_type} and {@code ClientType} are the same key, like Go's
  * {@code mapstructure} decoding.
  */
 public final class ConfigurationBinder {
@@ -45,7 +41,7 @@ public final class ConfigurationBinder {
             }
             out.add(new Property(name, m, a));
         }
-        out.sort((x, y) -> x.name().compareTo(y.name()));
+        out.sort(Comparator.comparing(Property::name));
         return out;
     }
 
@@ -67,9 +63,9 @@ public final class ConfigurationBinder {
             throw new ConnectorException("cannot create configuration " + type.getName() + ": " + e.getMessage(), e);
         }
         Map<String, Object> lower = new LinkedHashMap<>();
-        step.forEach((k, v) -> lower.putIfAbsent(k.toLowerCase(Locale.ROOT), v));
+        step.forEach((k, v) -> lower.putIfAbsent(normalize(k), v));
         for (Property p : properties(type)) {
-            String key = p.name().toLowerCase(Locale.ROOT);
+            String key = normalize(p.name());
             if (!lower.containsKey(key)) {
                 if (p.annotation().required()) {
                     throw new ConnectorException("missing required property \"" + p.name() + "\"");
@@ -78,6 +74,9 @@ public final class ConfigurationBinder {
             }
             Object value = lower.get(key);
             if (value == null) {
+                if (p.annotation().required()) {
+                    throw new ConnectorException("missing required property \"" + p.name() + "\"");
+                }
                 continue;
             }
             try {
@@ -93,6 +92,11 @@ public final class ConfigurationBinder {
         return config;
     }
 
+    /** The form keys are compared in: lower case, without underscores. */
+    public static String normalize(String key) {
+        return key.replace("_", "").toLowerCase(Locale.ROOT);
+    }
+
     static Object convert(Object value, Type target, String name) {
         Class<?> raw = rawType(target);
         try {
@@ -103,7 +107,11 @@ public final class ConfigurationBinder {
                 return Cast.toStringStrict(value);
             }
             if (raw == int.class || raw == Integer.class) {
-                return (int) Cast.toLongStrict(value);
+                long l = Cast.toLongStrict(value);
+                if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE) {
+                    throw new ConnectorException("'" + name + "': " + l + " is out of range");
+                }
+                return (int) l;
             }
             if (raw == long.class || raw == Long.class) {
                 return Cast.toLongStrict(value);

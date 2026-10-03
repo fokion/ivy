@@ -1,46 +1,33 @@
 package xyz.fokion.ivy.core.engine;
 
-import java.util.List;
-import java.util.Map;
-
+import xyz.fokion.ivy.core.log.IvyLog;
 import xyz.fokion.ivy.core.log.IvyLog.Fields;
 
 /**
- * What venom carried in its {@code context.Context}: log fields, secrets and the variables of
- * the current step.
+ * The position in a run: log fields, the file of the suite being run, and the log and console
+ * of that suite.
  */
-record RunContext(Fields fields, Map<String, String> vars) {
+record RunContext(Fields fields, String filepath, IvyLog log, Console console) {
 
-    static RunContext root() {
-        return new RunContext(Fields.EMPTY, Map.of());
+    static RunContext root(IvyLog log, Console console) {
+        return new RunContext(Fields.EMPTY, "", log, console);
     }
 
-    String var(String name) {
-        String v = vars.get(name);
-        return v == null ? "" : v;
-    }
-
-    List<String> secrets() {
-        return fields.secrets();
-    }
-
-    RunContext withTestsuite(String name) {
-        return new RunContext(fields.withTestsuite(name), vars);
+    /** The context of a suite, with a log and a console of its own. */
+    RunContext withTestsuite(String name, String file, IvyLog suiteLog, Console suiteConsole) {
+        return new RunContext(fields.withTestsuite(name), file, suiteLog, suiteConsole);
     }
 
     RunContext withTestcase(String name) {
-        return new RunContext(fields.withTestcase(name), vars);
+        return new RunContext(fields.withTestcase(name), filepath, log, console);
     }
 
     RunContext withExecutor(String name) {
-        return new RunContext(fields.withExecutor(name), vars);
+        return new RunContext(fields.withExecutor(name), filepath, log, console);
     }
 
-    RunContext withSecrets(List<String> secrets) {
-        return new RunContext(fields.withSecrets(secrets), vars);
-    }
-
-    RunContext withVars(Map<String, String> v) {
-        return new RunContext(fields, v);
+    /** The same position in another file, for the steps of a user executor. */
+    RunContext withFile(String file) {
+        return new RunContext(fields, file, log, console);
     }
 }

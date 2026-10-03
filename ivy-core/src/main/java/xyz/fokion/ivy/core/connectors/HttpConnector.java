@@ -22,10 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-import xyz.fokion.ivy.core.template.Interpolator;
 import xyz.fokion.ivy.core.util.GoStrings;
 import xyz.fokion.ivy.spi.Connector;
 import xyz.fokion.ivy.spi.ConnectorClass;
@@ -33,19 +30,33 @@ import xyz.fokion.ivy.spi.ConnectorException;
 import xyz.fokion.ivy.spi.DefaultAssertionsProvider;
 import xyz.fokion.ivy.spi.StepContext;
 import xyz.fokion.ivy.spi.Struct;
-import xyz.fokion.ivy.spi.ZeroValueResultProvider;
-import xyz.fokion.ivy.spi.util.Json;
+import xyz.fokion.ivy.spi.util.LazyJson;
 
 /**
- * HTTP requests, port of venom's {@code http} executor on {@link HttpClient}.
+ * HTTP requests on {@link HttpClient}, with the semantics of Go's {@code net/http} client.
  * <p>
  * Differences: {@code unix_sock} is not supported; with {@code resolve} the request goes to the
  * resolved host with the original {@code Host} header, and certificates are checked against the
  * original host.
+ * <p>
+ * Result: {@code status}, {@code headers} (lower-case names), {@code body} (parsed when it is
+ * JSON, else the text), {@code bodyText}, {@code request} ({@code method}, {@code url},
+ * {@code headers}, {@code body}), {@code durationMs} and {@code error}.
  */
 @ConnectorClass(type = "http", configurationClass = HttpConfiguration.class)
-public final class HttpConnector implements Connector<HttpConfiguration>, DefaultAssertionsProvider,
-        ZeroValueResultProvider {
+public final class HttpConnector implements Connector<HttpConfiguration>, DefaultAssertionsProvider {
+
+    @Override
+    public java.util.Map<String, String> resultFields() {
+        return Connector.fields(
+                "status", "the HTTP status code",
+                "headers", "the response headers, by name",
+                "body", "the body, parsed when it is JSON, text otherwise",
+                "bodyText", "the body as text",
+                "request", "the request sent: method, url, headers, body",
+                "durationMs", "the duration in milliseconds",
+                "error", "why the request failed, empty otherwise");
+    }
 
     /**
      * Lets steps set the Host header, as with Go. The JDK reads the property when its HTTP client
@@ -61,36 +72,30 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
 
     @Override
     public List<Object> defaultAssertions() {
-        return List.of("result.statuscode ShouldEqual 200");
+        return List.of("result.status == 200");
     }
 
-    @Override
-    public Object zeroValueResult() {
-        return result(0, 0, request("", "", null, ""), "", null, null, "", "");
+    private static Map<String, Object> request(String method, String url, Map<String, List<String>> header, String body) {
+        Map<String, Object> headers = new LinkedHashMap<>();
+        header.forEach((k, v) -> headers.put(k.toLowerCase(Locale.ROOT), String.join(", ", v)));
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("method", method);
+        request.put("url", url);
+        request.put("headers", headers);
+        request.put("body", body);
+        return request;
     }
 
-    private static Struct request(String method, String url, Map<String, List<String>> header, String body) {
-        return Struct.builder("HTTPRequest")
-                .put("method", method)
-                .put("url", url)
-                .put("header", header)
-                .put("body", body)
-                .put("form", null)
-                .put("post_form", null)
-                .build();
-    }
-
-    private static Struct result(double seconds, int status, Struct request, String body, Object bodyJson,
-            Map<String, String> headers, String err, String systemout) {
+    private static Struct result(long durationMs, int status, Map<String, Object> request, Object body, String bodyText,
+            Map<String, String> headers) {
         return Struct.builder("Result")
-                .put("timeseconds", seconds)
-                .put("statuscode", (long) status)
-                .put("request", request)
-                .put("body", body)
-                .put("bodyjson", bodyJson)
+                .put("status", (long) status)
                 .put("headers", headers)
-                .put("err", err)
-                .put("systemout", systemout)
+                .put("body", body)
+                .put("bodyText", bodyText)
+                .put("request", request)
+                .put("durationMs", durationMs)
+                .put("error", "")
                 .build();
     }
 
@@ -115,10 +120,10 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
         if (!e.body().isEmpty()) {
             body = e.body().getBytes(StandardCharsets.UTF_8);
         } else if (!e.bodyFile().isEmpty()) {
-            body = bodyFile(e, workdir, context, url);
+            body = bodyFile(e, workdir, context);
         } else if (e.multipartForm() != null) {
             String boundary = UUID.randomUUID().toString().replace("-", "");
-            body = multipart(e.multipartForm(), boundary, workdir);
+            body = multipart(e.multipartForm(), boundary);
             contentType = "multipart/form-data; boundary=" + boundary;
         }
 
@@ -144,73 +149,33 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
         }
         e.headers().forEach((k, v) -> requestHeaders.put(canonicalHeaderKey(k), List.of(v)));
 
-        String verifyHost = null;
-        URI target = uri;
         for (String r : e.resolve()) {
-            String[] tuple = r.split(":");
-            if (tuple.length != 3) {
+            if (r.split(":").length != 3) {
                 throw new ConnectorException("invalid value for resolve attribute: " + e.resolve());
             }
-            int port = uri.getPort() != -1 ? uri.getPort() : "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
-            if (tuple[0].equalsIgnoreCase(uri.getHost()) && tuple[1].equals(Integer.toString(port))) {
-                verifyHost = uri.getHost();
-                target = new URI(uri.getScheme(), uri.getUserInfo(), tuple[2], uri.getPort(), uri.getPath(),
-                        uri.getQuery(), uri.getFragment());
-                if (!requestHeaders.containsKey("Host")) {
-                    requestHeaders.put("Host", List.of(uri.getRawAuthority()));
-                }
-            }
         }
-
-        HttpClient.Builder builder = HttpClient.newBuilder()
-                .cookieHandler(new CookieJar())
-                .followRedirects(e.noFollowRedirect() ? HttpClient.Redirect.NEVER : HttpClient.Redirect.ALWAYS)
-                .proxy(proxy(e.proxy()));
-        if ("https".equalsIgnoreCase(uri.getScheme())) {
-            builder.version(HttpClient.Version.HTTP_2);
-            try {
-                builder.sslContext(Tls.context(e.ignoreVerifySsl(), readOrInline(e.tlsRootCa(), workdir),
-                        readOrInline(e.tlsClientCert(), workdir), readOrInline(e.tlsClientKey(), workdir), verifyHost));
-            } catch (GeneralSecurityException ex) {
-                throw new ConnectorException(ex.getMessage(), ex);
-            }
-        } else {
-            builder.version(HttpClient.Version.HTTP_1_1);
-        }
-
-        HttpRequest.Builder req = HttpRequest.newBuilder(target)
-                .method(method, body.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
-        requestHeaders.forEach((k, values) -> values.forEach(v -> req.header(k, v)));
 
         String requestBody = new String(body, StandardCharsets.UTF_8);
         String requestContentType = requestHeaders.getOrDefault("Content-Type", List.of("")).getFirst();
         if (e.preserveBodyFile() || !isContentTypeSupported(requestContentType)) {
             requestBody = "";
         }
-        Struct request = request(method, uri.toString(), requestHeaders, requestBody);
+        Map<String, Object> request = request(method, uri.toString(), requestHeaders, requestBody);
 
+        TlsMaterial tls = new TlsMaterial(readOrInline(e.tlsRootCa(), workdir), readOrInline(e.tlsClientCert(), workdir),
+                readOrInline(e.tlsClientKey(), workdir));
         long start = System.nanoTime();
-        HttpResponse<byte[]> resp;
-        try (HttpClient client = builder.build()) {
-            resp = client.send(req.build(), HttpResponse.BodyHandlers.ofByteArray());
-        } catch (IOException ex) {
-            throw new ConnectorException(method + " \"" + uri + "\": " + (ex.getMessage() == null ? ex.toString() : ex.getMessage()), ex);
-        }
-        double seconds = (System.nanoTime() - start) / 1e9;
+        HttpResponse<byte[]> resp = send(e, uri, method, body, new TreeMap<>(requestHeaders), tls);
+        long durationMs = (System.nanoTime() - start) / 1_000_000;
 
         String respContentType = resp.headers().firstValue("content-type").orElse("");
-        String bodyString = "";
-        Object bodyJson = null;
-        String systemout = "";
+        String bodyText = "";
+        Object parsedBody = "";
         if (!e.skipBody() && isContentTypeSupported(respContentType)) {
-            bodyString = new String(resp.body(), StandardCharsets.UTF_8);
+            bodyText = new String(resp.body(), StandardCharsets.UTF_8);
             String mediaType = mediaType(respContentType);
-            if (mediaType.contains("application/json") || mediaType.endsWith("+json")) {
-                bodyJson = Json.tryParse(bodyString);
-            }
-            String shown = bodyJson != null ? Json.write(bodyJson, Json.GO) : bodyString;
-            systemout = "===== Result Info =====\n\t\tMethod:     " + resp.request().method()
-                    + "\n\t\tURL:        " + resp.uri() + "\n\t\tBody:       " + shown + "\n\t\t======================";
+            // parsed the first time an expression reads into it
+            parsedBody = mediaType.contains("json") ? LazyJson.orText(bodyText) : bodyText;
         }
         Map<String, String> headers = null;
         if (!e.skipHeaders()) {
@@ -219,14 +184,14 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
                 if (h.getKey().startsWith(":")) {
                     continue;
                 }
-                String key = canonicalHeaderKey(h.getKey());
-                headers.put(key, String.join(key.equalsIgnoreCase("set-cookie") ? "; " : ", ", h.getValue()));
+                String key = h.getKey().toLowerCase(Locale.ROOT);
+                headers.put(key, String.join(key.equals("set-cookie") ? "; " : ", ", h.getValue()));
             }
         }
-        return result(seconds, resp.statusCode(), request, bodyString, bodyJson, headers, "", systemout);
+        return result(durationMs, resp.statusCode(), request, parsedBody, bodyText, headers);
     }
 
-    private static byte[] bodyFile(HttpConfiguration e, Path workdir, StepContext context, String url) throws IOException {
+    private static byte[] bodyFile(HttpConfiguration e, Path workdir, StepContext context) throws IOException {
         Path file = Path.of(e.bodyFile());
         if (!file.isAbsolute()) {
             file = workdir.resolve(e.bodyFile());
@@ -238,52 +203,141 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
         if (e.preserveBodyFile()) {
             return content;
         }
-        Map<String, String> vars = context.vars();
         String str = new String(content, StandardCharsets.UTF_8);
-        int upperLimit = vars.size();
-        int counter = 0;
-        while (str.contains("{{.")) {
-            String next;
-            try {
-                next = Interpolator.interpolate(str, vars);
-            } catch (Interpolator.InterpolationException ex) {
-                throw new ConnectorException("unable to interpolate file " + url + ": " + ex.getMessage(), ex);
-            }
-            if (next.equals(str) && counter > upperLimit) {
-                Matcher m = Pattern.compile("\\{\\{\\..*}}").matcher(str);
-                List<String> unresolved = new ArrayList<>();
-                while (m.find()) {
-                    unresolved.add(m.group());
-                }
-                throw new ConnectorException("unable to interpolate file due to unresolved variables " + String.join(",", unresolved));
-            }
-            str = next;
-            counter++;
+        try {
+            str = context.interpolate(str);
+        } catch (RuntimeException ex) {
+            throw new ConnectorException("unable to render file " + file + ": " + ex.getMessage(), ex);
         }
         return str.getBytes(StandardCharsets.UTF_8);
     }
 
+    private record TlsMaterial(byte[] roots, byte[] clientCert, byte[] clientKey) {
+    }
+
+    /** Where a request goes once {@code resolve} is applied. */
+    record Target(URI uri, String verifyHost, String hostHeader) {
+    }
+
+    /** Applies {@code host:port:address} overrides: the URL host is replaced, the Host header kept. */
+    static Target target(URI uri, List<String> resolve) throws URISyntaxException {
+        int port = uri.getPort() != -1 ? uri.getPort() : "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+        for (String r : resolve) {
+            String[] tuple = r.split(":");
+            if (tuple[0].equalsIgnoreCase(uri.getHost()) && tuple[1].equals(Integer.toString(port))) {
+                // rebuilt from the raw parts so that escaped characters stay escaped
+                String authority = (uri.getRawUserInfo() == null ? "" : uri.getRawUserInfo() + "@") + tuple[2]
+                        + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
+                String rebuilt = uri.getScheme() + "://" + authority
+                        + (uri.getRawPath() == null ? "" : uri.getRawPath())
+                        + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery())
+                        + (uri.getRawFragment() == null ? "" : "#" + uri.getRawFragment());
+                return new Target(new URI(rebuilt), uri.getHost(), uri.getRawAuthority());
+            }
+        }
+        return new Target(uri, null, null);
+    }
+
+    private static final int MAX_REDIRECTS = 10;
+
+    /**
+     * Sends the request, following redirects as Go's {@code http.Client} does: 301/302/303 turn
+     * the request into a GET without body, 307/308 keep both; credentials and cookies set by the
+     * step are not sent to another domain; at most 10 redirects.
+     */
+    /**
+     * The threads of every client: shared, as a client is built per request and per redirect hop
+     * (its cookie jar lasts one step), and closing a client does not shut down an executor it was
+     * given.
+     */
+    private static final java.util.concurrent.ExecutorService CLIENT_THREADS =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+
+    private static HttpResponse<byte[]> send(HttpConfiguration e, URI uri, String method, byte[] body,
+            Map<String, List<String>> headers, TlsMaterial tls) throws Exception {
+        CookieJar jar = new CookieJar();
+        URI current = uri;
+        String currentMethod = method;
+        byte[] currentBody = body;
+        for (int hop = 0; ; hop++) {
+            Target t = target(current, e.resolve());
+            HttpClient.Builder builder = HttpClient.newBuilder()
+                    .cookieHandler(jar)
+                    .executor(CLIENT_THREADS)
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .proxy(proxy(e.proxy()));
+            if ("https".equalsIgnoreCase(current.getScheme())) {
+                builder.version(HttpClient.Version.HTTP_2);
+                try {
+                    builder.sslContext(Tls.context(e.ignoreVerifySsl(), tls.roots(), tls.clientCert(), tls.clientKey(),
+                            t.verifyHost()));
+                } catch (GeneralSecurityException ex) {
+                    throw new ConnectorException(ex.getMessage(), ex);
+                }
+            } else {
+                builder.version(HttpClient.Version.HTTP_1_1);
+            }
+            HttpRequest.Builder req = HttpRequest.newBuilder(t.uri()).method(currentMethod,
+                    currentBody.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(currentBody));
+            headers.forEach((k, values) -> values.forEach(v -> req.header(k, v)));
+            if (t.hostHeader() != null && !headers.containsKey("Host")) {
+                req.header("Host", t.hostHeader());
+            }
+            HttpResponse<byte[]> resp;
+            try (HttpClient client = builder.build()) {
+                resp = client.send(req.build(), HttpResponse.BodyHandlers.ofByteArray());
+            } catch (IOException ex) {
+                throw new ConnectorException(currentMethod + " \"" + current + "\": "
+                        + (ex.getMessage() == null ? ex.toString() : ex.getMessage()), ex);
+            }
+            int status = resp.statusCode();
+            String location = resp.headers().firstValue("location").orElse(null);
+            boolean redirect = status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+            if (e.noFollowRedirect() || !redirect || location == null) {
+                return resp;
+            }
+            if (hop + 1 > MAX_REDIRECTS) {
+                throw new ConnectorException(method + " \"" + location + "\": stopped after 10 redirects");
+            }
+            URI next = current.resolve(escapeIllegal(location));
+            if (status != 307 && status != 308) {
+                if (!currentMethod.equals("GET") && !currentMethod.equals("HEAD")) {
+                    currentMethod = "GET";
+                }
+                currentBody = new byte[0];
+            }
+            if (!sameOrSubdomain(current.getHost(), next.getHost())) {
+                for (String sensitive : List.of("Authorization", "Www-Authenticate", "Cookie", "Cookie2")) {
+                    headers.remove(sensitive);
+                }
+            }
+            // a Host header set by the step only follows relative redirects
+            if (new URI(escapeIllegal(location)).isAbsolute()) {
+                headers.remove("Host");
+            }
+            current = next;
+        }
+    }
+
+    /** Go's {@code shouldCopyHeaderOnRedirect}: same host, or a subdomain of it. */
+    static boolean sameOrSubdomain(String from, String to) {
+        if (from == null || to == null) {
+            return false;
+        }
+        String f = from.toLowerCase(Locale.ROOT);
+        String t = to.toLowerCase(Locale.ROOT);
+        return t.equals(f) || t.endsWith("." + f);
+    }
+
     /** A form part per value; a value {@code @path[;type=content/type]} attaches a file. */
-    private static byte[] multipart(Object form, String boundary, Path workdir) throws IOException {
+    private static byte[] multipart(Object form, String boundary) throws IOException {
         if (!(form instanceof Map<?, ?> fields)) {
             throw new ConnectorException("'multipart_form' should be a map");
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         for (Map.Entry<?, ?> field : fields.entrySet()) {
             String key = String.valueOf(field.getKey());
-            List<String> values = new ArrayList<>();
-            if (field.getValue() instanceof String s) {
-                values.add(s);
-            } else if (field.getValue() instanceof List<?> l) {
-                for (Object item : l) {
-                    if (!(item instanceof String s)) {
-                        throw new ConnectorException("'multipart_form' list values must be strings");
-                    }
-                    values.add(s);
-                }
-            } else {
-                throw new ConnectorException("'multipart_form' values must be a string or a list of strings");
-            }
+            List<String> values = parseFieldValues(field);
             for (String value : values) {
                 out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
                 Path file = null;
@@ -314,6 +368,23 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
         }
         out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         return out.toByteArray();
+    }
+
+    private static List<String> parseFieldValues(Map.Entry<?, ?> field) {
+        List<String> values = new ArrayList<>();
+        if (field.getValue() instanceof String s) {
+            values.add(s);
+        } else if (field.getValue() instanceof List<?> l) {
+            for (Object item : l) {
+                if (!(item instanceof String s)) {
+                    throw new ConnectorException("'multipart_form' list values must be strings");
+                }
+                values.add(s);
+            }
+        } else {
+            throw new ConnectorException("'multipart_form' values must be a string or a list of strings");
+        }
+        return values;
     }
 
     /**
@@ -452,8 +523,7 @@ public final class HttpConnector implements Connector<HttpConfiguration>, Defaul
 
     private static String mediaType(String contentType) {
         int semi = contentType.indexOf(';');
-        String t = (semi < 0 ? contentType : contentType.substring(0, semi)).strip().toLowerCase(Locale.ROOT);
-        return t;
+        return (semi < 0 ? contentType : contentType.substring(0, semi)).strip().toLowerCase(Locale.ROOT);
     }
 
     /** Whether a body of this type is text that can be reported. */

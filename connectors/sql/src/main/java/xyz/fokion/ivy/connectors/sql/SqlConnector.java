@@ -26,20 +26,20 @@ import xyz.fokion.ivy.spi.ConnectorClass;
 import xyz.fokion.ivy.spi.ConnectorException;
 import xyz.fokion.ivy.spi.StepContext;
 import xyz.fokion.ivy.spi.Struct;
-import xyz.fokion.ivy.spi.ZeroValueResultProvider;
 
 /**
- * Runs SQL commands or a SQL file, port of venom's {@code sql} executor.
+ * Runs SQL commands or a SQL file.
  * <p>
- * Result: {@code result.queries.queries<N>.rows.rows<M>.<column>}. Like venom, the step has no
- * default assertion.
+ * Result: {@code queries[]}, one per statement, each with {@code rows[]} of column values:
+ * {@code result.queries[0].rows[1].name}. The step has no default assertion.
  */
 @ConnectorClass(type = "sql", configurationClass = SqlConfiguration.class)
-public final class SqlConnector implements Connector<SqlConfiguration>, ZeroValueResultProvider {
+public final class SqlConnector implements Connector<SqlConfiguration> {
 
     @Override
-    public Object zeroValueResult() {
-        return Struct.of("Result", Map.of("queries", List.of()));
+    public java.util.Map<String, String> resultFields() {
+        return Connector.fields(
+                "queries", "one entry per command, with its rows[]: each row maps column names to values");
     }
 
     @Override
@@ -75,10 +75,14 @@ public final class SqlConnector implements Connector<SqlConfiguration>, ZeroValu
     }
 
     /** Finds the driver among those embedded in this bundle, without the global DriverManager. */
-    private static Connection connect(String url) throws SQLException {
+    static Connection connect(String url) throws SQLException {
+        return connect(url, new Properties());
+    }
+
+    static Connection connect(String url, Properties properties) throws SQLException {
         for (Driver driver : ServiceLoader.load(Driver.class, SqlConnector.class.getClassLoader())) {
             if (driver.acceptsURL(url)) {
-                Connection c = driver.connect(url, new Properties());
+                Connection c = driver.connect(url, properties);
                 if (c != null) {
                     return c;
                 }
@@ -111,7 +115,7 @@ public final class SqlConnector implements Connector<SqlConfiguration>, ZeroValu
     }
 
     /** Converts JDBC values to the types results use: Long, Double, Boolean, String. */
-    private static Object value(Object v) throws SQLException {
+    static Object value(Object v) throws SQLException {
         return switch (v) {
             case null -> null;
             case Integer i -> i.longValue();
@@ -119,7 +123,13 @@ public final class SqlConnector implements Connector<SqlConfiguration>, ZeroValu
             case Byte b -> b.longValue();
             case Long l -> l;
             case BigInteger bi -> bi.bitLength() < 64 ? (Object) bi.longValue() : bi.toString();
-            case BigDecimal bd -> bd.scale() <= 0 && bd.precision() < 19 ? (Object) bd.longValueExact() : bd.doubleValue();
+            case BigDecimal bd -> {
+                try {
+                    yield bd.stripTrailingZeros().scale() <= 0 ? (Object) bd.longValueExact() : bd.doubleValue();
+                } catch (ArithmeticException tooLarge) {
+                    yield bd.doubleValue();
+                }
+            }
             case Float f -> f.doubleValue();
             case Double d -> d;
             case Boolean b -> b;

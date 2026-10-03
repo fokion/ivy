@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><title>Cookie</title></head>
+<body>
+<div id="cookie"></div>
+<script>
+  if (location.search.includes('set')) {
+    document.cookie = 'session=1; path=/';
+  }
+  document.getElementById('cookie').textContent = document.cookie;
+</script>
+</body></html>
