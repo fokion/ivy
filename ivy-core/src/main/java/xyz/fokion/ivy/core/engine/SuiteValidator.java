@@ -119,8 +119,9 @@ final class SuiteValidator {
     static List<String> validateStep(Map<String, Object> step, Set<String> roots, Set<String> local, Ivy ivy)
             throws IvyException {
         legacy(step);
+        waiting(step);
         // written values are checked now; templates once they are rendered
-        for (String key : List.of("retry", "delay", "timeout")) {
+        for (String key : List.of("retry", "delay", "timeout", "within", "every")) {
             if (step.get(key) == null || step.get(key) instanceof String s && Template.has(s)) {
                 continue;
             }
@@ -145,7 +146,7 @@ final class SuiteValidator {
         } else if (range != null) {
             Template.collectRoots(range, stepRoots);
         }
-        for (String key : List.of("if", "retryIf")) {
+        for (String key : List.of("if", "retryIf", "until")) {
             Object v = step.get(key);
             if (v == null) {
                 continue;
@@ -154,7 +155,7 @@ final class SuiteValidator {
                 throw new IllegalArgumentException("'" + key + "' must be an expression, got " + v);
             }
             stepRoots.addAll(Expression.compile(s).roots());
-            if (key.equals("retryIf")) {
+            if (!key.equals("if")) {
                 resultFields.addAll(Expression.compile(s).members("result"));
             }
         }
@@ -211,7 +212,35 @@ final class SuiteValidator {
         return warnings;
     }
 
-    /** Whether a step reads {@code result}, in its assertions, info, set or retryIf. */
+    /** Checks that a step waits ({@code until}) or retries ({@code retry}), not both, and waits for something. */
+    private static void waiting(Map<String, Object> step) {
+        boolean until = step.containsKey("until");
+        if (!until && (step.containsKey("within") || step.containsKey("every"))) {
+            throw new IllegalArgumentException("'within' and 'every' go with 'until', the condition the step waits for");
+        }
+        if (!until) {
+            return;
+        }
+        if (step.containsKey("retry") || step.containsKey("retryIf") || step.containsKey("delay")) {
+            throw new IllegalArgumentException("a step waits with 'until' ('within', 'every') or retries with 'retry' "
+                    + "('retryIf', 'delay'), not both");
+        }
+        if (stepType(step).isEmpty()) {
+            throw new IllegalArgumentException("a step without a type runs nothing, so its result never changes: "
+                    + "put 'until' on the step that gets the result");
+        }
+        if (step.get("every") != null && !(step.get("every") instanceof String e && Template.has(e))) {
+            try {
+                if (Ivy.secondsValue(step, "every").isZero()) {
+                    throw new IllegalArgumentException("'every' must be more than 0 seconds");
+                }
+            } catch (IvyException e) {
+                throw new IllegalArgumentException(e.getMessage());
+            }
+        }
+    }
+
+    /** Whether a step reads {@code result}, in its assertions, info, set, retryIf or until. */
     private static boolean readsResult(Map<String, Object> step) {
         List<String> read = new ArrayList<>();
         if (step.get("assertions") instanceof List<?> assertions) {
@@ -221,15 +250,17 @@ final class SuiteValidator {
             set.values().forEach(v -> read.add(String.valueOf(v)));
         }
         read.addAll(Ivy.stringSliceValue(step, "info"));
-        if (step.get("retryIf") instanceof String r) {
-            read.add(r);
+        for (String key : List.of("retryIf", "until")) {
+            if (step.get(key) instanceof String r) {
+                read.add(r);
+            }
         }
         return read.stream().anyMatch(s -> expressionOrTemplateRoots(s).contains("result"));
     }
 
     /** The keys of a step that are not properties of a connector. */
-    static final Set<String> STEP_KEYS = Set.of("type", "name", "retry", "retryIf", "delay", "timeout", "assertions", "if",
-            "set", "info", "range", "with");
+    static final Set<String> STEP_KEYS = Set.of("type", "name", "retry", "retryIf", "delay", "timeout", "until", "within",
+            "every", "assertions", "if", "set", "info", "range", "with");
 
     /** The type of a step: {@code exec} for a script or command without one; empty when it has none. */
     private static String stepType(Map<String, Object> step) {

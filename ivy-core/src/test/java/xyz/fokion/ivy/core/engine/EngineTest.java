@@ -393,6 +393,53 @@ class EngineTest {
     }
 
     @Test
+    void waitsUntilTheConditionHoldsThenChecksTheAssertions(@TempDir Path dir) throws Exception {
+        Path count = dir.resolve("count");
+        Ivy ivy = runSuite(dir, """
+                name: wait
+                testcases:
+                - name: third time
+                  steps:
+                  - script: n=$(( $(cat %s 2>/dev/null || echo 0) + 1 )); echo $n > %s; echo $n
+                    until: number(result.stdout) >= 3
+                    every: 0.1
+                    within: 5
+                    assertions:
+                    - result.stdout == "3"
+                """.formatted(count, count));
+        assertEquals(List.of(), errors(ivy));
+        assertEquals(2, ivy.tests().testSuites.getFirst().testCases.getFirst().testStepResults.getFirst().retries);
+    }
+
+    @Test
+    void failsWithTheValuesTheConditionReadWhenTheDeadlinePasses(@TempDir Path dir) throws Exception {
+        long start = System.nanoTime();
+        Ivy ivy = runSuite(dir, """
+                name: wait
+                testcases:
+                - name: never placed
+                  steps:
+                  - script: echo RECEIVED
+                    until: result.stdout == "PLACED"
+                    within: 0.5
+                    every: 0.1
+                - name: never up
+                  steps:
+                  - type: http
+                    url: http://localhost:1
+                    until: result.status == 200
+                    within: 0.3
+                    every: 0.1
+                """);
+        assertTrue((System.nanoTime() - start) / 1e9 < 3);
+        String placed = errors(ivy).getFirst();
+        assertTrue(placed.contains("suite.yml:5): until result.stdout == \"PLACED\" was still false after 0."), placed);
+        assertTrue(placed.contains("result.stdout = \"RECEIVED\""), placed);
+        String up = errors(ivy).get(1);
+        assertTrue(up.contains("the last attempt failed:"), "a request that fails is not yet ready: " + up);
+    }
+
+    @Test
     void setsValuesForLaterStepsAndTestCases(@TempDir Path dir) throws Exception {
         Ivy ivy = runSuite(dir, """
                 name: set

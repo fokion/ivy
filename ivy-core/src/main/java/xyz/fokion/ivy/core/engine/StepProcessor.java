@@ -44,7 +44,7 @@ import xyz.fokion.ivy.spi.util.Json;
 final class StepProcessor {
 
     /** Step keys that are expressions or apply after the step: not rendered before it runs. */
-    static final Set<String> CONTROL_KEYS = Set.of("assertions", "if", "retryIf", "set", "info", "range", "with");
+    static final Set<String> CONTROL_KEYS = Set.of("assertions", "if", "retryIf", "until", "set", "info", "range", "with");
 
     private final Ivy ivy;
 
@@ -432,7 +432,7 @@ final class StepProcessor {
             if (ts.retries == 0) {
                 console.println(" " + ivy.green(Status.PASS));
             } else {
-                console.println(" " + ivy.green(Status.PASS) + " (after " + ts.retries + " attempts)");
+                console.println(" " + ivy.green(Status.PASS) + " (after " + (ts.retries + 1) + " attempts)");
             }
             if (ts.computedInfo != null) {
                 ts.computedInfo.forEach(i -> console.println(" \t\t  " + ivy.cyan("[info]") + " " + ivy.cyan(i)));
@@ -487,6 +487,9 @@ final class StepProcessor {
 
     /** Runs a step with retries and applies the assertions; returns the scope with {@code result}. */
     private Scope runTestStep(Iteration it, ExecutorRunner e, Map<String, Object> step) {
+        if (e.waits()) {
+            return waitUntil(it, e, step);
+        }
         CaseRun run = it.run();
         RunContext ctx = run.ctx().withExecutor(e.name());
         TestCase tc = run.tc();
@@ -517,21 +520,7 @@ final class StepProcessor {
                 resultScope = it.scope().with("result", result);
                 tsResult.computedVars = new LinkedHashMap<>();
                 tsResult.computedVars.put("result", result);
-                for (String info : e.info()) {
-                    try {
-                        String text = Template.compile(info).renderString(resultScope);
-                        if (!text.isEmpty()) {
-                            int line = tc.findSourceLine(it.stepNumber() - 1, -1);
-                            if (line > 0) {
-                                text += " (" + ctx.filepath() + ":" + line + ")";
-                            }
-                            ctx.log().info(ctx.fields(), text);
-                            tsResult.addInfo(text);
-                        }
-                    } catch (ExprException ex) {
-                        ctx.log().error(ctx.fields(), "unable to render info \"" + info + "\": " + ex.getMessage());
-                    }
-                }
+                renderInfo(ctx, tc, it, e, resultScope, tsResult);
                 assertRes = ivy.checker.apply(ctx, resultScope, result, tc, it.stepNumber(), it.rangedIndex(), declared,
                         e.defaultAssertions());
                 tsResult.assertionsApplied = assertRes;
@@ -572,6 +561,114 @@ final class StepProcessor {
         tsResult.stderr += assertRes.stderr;
         tsResult.stdout += assertRes.stdout;
         return resultScope;
+    }
+
+    /**
+     * Runs a step again and again until its {@code until} expression holds, every {@code every}, for at most
+     * {@code within}; then applies the assertions to the result that met it. An attempt that fails to run, such as a
+     * request to a service not up yet, counts as "not yet". Returns the scope with {@code result}.
+     */
+    private Scope waitUntil(Iteration it, ExecutorRunner e, Map<String, Object> step) {
+        CaseRun run = it.run();
+        RunContext ctx = run.ctx().withExecutor(e.name());
+        TestCase tc = run.tc();
+        TestStepResult tsResult = it.tsResult();
+        Scope resultScope = it.scope().with("result", null);
+        Expression until = Expression.compile(e.until());
+        long start = System.nanoTime();
+        long deadline = start + e.within().toNanos();
+        int attempts = 0;
+        boolean met = false;
+        boolean wrong = false;
+        String lastError = null;
+        Expression.Traced trace = null;
+        TestStepResult userAttempt = null;
+        while (true) {
+            attempts++;
+            userAttempt = e.isUser() ? new TestStepResult() : null;
+            try {
+                Object result = runExecutor(ctx, e, it, step, userAttempt);
+                resultScope = it.scope().with("result", result);
+                tsResult.computedVars = new LinkedHashMap<>();
+                tsResult.computedVars.put("result", result);
+                lastError = null;
+                trace = until.evaluateTraced(resultScope);
+                met = Values.truthy(trace.value());
+            } catch (ExprException ex) {
+                // the expression itself is wrong: waiting longer cannot help
+                tsResult.appendFailure(Failures.newFailure(ctx, tc, it.stepNumber(), it.rangedIndex(), -1, "",
+                        "cannot evaluate until " + e.until() + ": " + ex.getMessage()));
+                wrong = true;
+                break;
+            } catch (Exception ex) {
+                lastError = message(ex);
+            }
+            if (met || ivy.isCancelled() || System.nanoTime() + e.every().toNanos() > deadline) {
+                break;
+            }
+            ctx.log().debug(ctx.fields(), "until " + e.until() + " is not true yet, attempt " + attempts
+                    + ", next in " + Ivy.formatSeconds(e.every()) + "s");
+            sleep(e.every());
+        }
+        tsResult.retries = attempts - 1;
+        String waited = Ivy.formatSeconds(Duration.ofMillis((System.nanoTime() - start) / 1_000_000));
+        if (userAttempt != null) {
+            userAttempt.errorList().forEach(tsResult::appendFailure);
+            if (userAttempt.computedInfo != null) {
+                userAttempt.computedInfo.forEach(tsResult::addInfo);
+            }
+            tsResult.stdout += userAttempt.stdout;
+            tsResult.stderr += userAttempt.stderr;
+        }
+        renderInfo(ctx, tc, it, e, resultScope, tsResult);
+        if (!met) {
+            if (wrong) {
+                return resultScope;
+            }
+            StringBuilder message = new StringBuilder("until " + e.until() + " was still false after " + waited + "s ("
+                    + attempts + " attempt" + (attempts == 1 ? "" : "s") + ", within " + Ivy.formatSeconds(e.within()) + "s)");
+            if (lastError != null) {
+                message.append("\n  the last attempt failed: ").append(lastError);
+            } else if (trace != null) {
+                for (Expression.Part p : trace.parts()) {
+                    message.append("\n  ").append(p.text()).append(" = ")
+                            .append(Values.describe(p.value(), AssertionChecker.MAX_VALUE_LENGTH));
+                }
+            }
+            tsResult.appendFailure(Failures.newFailure(ctx, tc, it.stepNumber(), it.rangedIndex(), -1, e.until(),
+                    message.toString()));
+            return resultScope;
+        }
+        ctx.log().info(ctx.fields(), "until " + e.until() + " is true after " + waited + "s (" + attempts + " attempt"
+                + (attempts == 1 ? "" : "s") + ")");
+        List<?> declared = it.step().get("assertions") instanceof List<?> l ? l : null;
+        AssertionsApplied assertRes = ivy.checker.apply(ctx, resultScope, tsResult.computedVars.get("result"), tc,
+                it.stepNumber(), it.rangedIndex(), declared, e.defaultAssertions());
+        tsResult.assertionsApplied = assertRes;
+        assertRes.errors.forEach(tsResult::appendFailure);
+        tsResult.stderr += assertRes.stderr;
+        tsResult.stdout += assertRes.stdout;
+        return resultScope;
+    }
+
+    /** Renders the {@code info} lines of a step against its result. */
+    private static void renderInfo(RunContext ctx, TestCase tc, Iteration it, ExecutorRunner e, Scope resultScope,
+            TestStepResult tsResult) {
+        for (String info : e.info()) {
+            try {
+                String text = Template.compile(info).renderString(resultScope);
+                if (!text.isEmpty()) {
+                    int line = tc.findSourceLine(it.stepNumber() - 1, -1);
+                    if (line > 0) {
+                        text += " (" + ctx.filepath() + ":" + line + ")";
+                    }
+                    ctx.log().info(ctx.fields(), text);
+                    tsResult.addInfo(text);
+                }
+            } catch (ExprException ex) {
+                ctx.log().error(ctx.fields(), "unable to render info \"" + info + "\": " + ex.getMessage());
+            }
+        }
     }
 
     private static void sleep(Duration delay) {

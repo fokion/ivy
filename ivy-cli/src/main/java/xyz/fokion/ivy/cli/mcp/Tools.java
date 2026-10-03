@@ -58,7 +58,9 @@ final class Tools {
             Variables a suite gets when it runs (hosts, credentials) are passed as vars, and secrets as secrets, to
             validate_suite, write_suite and run_suite; the server may also have been started with them
             (--var-from-file, --secret-from-file). run_suite reports the info lines of every step, and with details
-            the result of every step. delete_suite removes a suite that is no longer wanted.""";
+            the result of every step. delete_suite removes a suite that is no longer wanted.
+            To wait for something to happen (a job to finish, a service to start), give the step until (an expression
+            on its result), within and every, in seconds; retry is for steps whose assertions fail now and then.""";
 
     private static final Map<String, Object> VARS = Map.of("type", "object",
             "description", "variables, as on the command line, e.g. {\"base\": \"http://localhost:8080\"}");
@@ -768,9 +770,16 @@ final class Tools {
                 set:                      # values for later steps and test cases
                   id: result.body.id
                 info: "created ${result.body.id}"
-                retry: 3                  # with delay (seconds) and retryIf (an expression)
-                delay: 1
-                timeout: 10               # seconds
+                retry: 3                  # runs again while an assertion fails: delay (seconds), retryIf
+                delay: 0.5
+                timeout: 10               # seconds one attempt may take
+              - type: http
+                url: ${base}/items/${id}
+                until: result.body.state == "ready"   # waits: runs again until true, then checks assertions
+                within: 10                # seconds to wait at most (default 30)
+                every: 0.5                # seconds between attempts (default 1); failed attempts count as not yet
+              - assertions: [id != null]  # a step without a type runs nothing: it checks variables and the
+                                          # result of the step before it
               - script: echo ${id}        # a step with script or command is an exec step
                 range: [1, 2, 3]          # repeats the step: index, key, value
                 if: value > 1
@@ -784,7 +793,7 @@ final class Tools {
     static final String BUILTINS = """
             env.NAME                      environment variables
             cases.<test case>.<name>      values set by an earlier test case of the suite (name or slug)
-            result                        the result of the step, in assertions, retryIf, info and set
+            result                        the result of the step, in assertions, retryIf, until, info and set
             index, key, value             the current item of a ranged step
             input.<name>                  the inputs of a user executor (lib/*.yml)
             ivy.suite.name, .shortName, .file, .path, .workdir, .totalSteps

@@ -617,23 +617,26 @@ public final class Ivy {
         String retryIf = raw.get("retryIf") instanceof String s ? s : "";
         Duration delay = secondsValue(step, "delay");
         Duration timeout = secondsValue(step, "timeout");
+        String until = raw.get("until") instanceof String u ? u : "";
+        Duration within = step.get("within") == null ? ExecutorRunner.DEFAULT_WITHIN : secondsValue(step, "within");
+        Duration every = step.get("every") == null ? ExecutorRunner.DEFAULT_EVERY : secondsValue(step, "every");
         List<String> info = stringSliceValue(raw, "info");
 
         if (name.isEmpty()) {
-            return new ExecutorRunner(name, "builtin", retry, retryIf, delay, timeout, info, null, null);
+            return new ExecutorRunner(name, "builtin", retry, retryIf, delay, timeout, until, within, every, info, null, null);
         }
         Optional<ConnectorFacade> b = builtin.find(name);
         if (b.isPresent()) {
-            return new ExecutorRunner(name, "builtin", retry, retryIf, delay, timeout, info, b.get(), null);
+            return new ExecutorRunner(name, "builtin", retry, retryIf, delay, timeout, until, within, every, info, b.get(), null);
         }
         UserExecutor ux = userExecutors.get(name);
         if (ux != null) {
-            return new ExecutorRunner(name, "user", retry, retryIf, delay, timeout, info, null, ux);
+            return new ExecutorRunner(name, "user", retry, retryIf, delay, timeout, until, within, every, info, null, ux);
         }
         for (ConnectorInfoManager m : plugins) {
             Optional<ConnectorFacade> p = m.find(name);
             if (p.isPresent()) {
-                return new ExecutorRunner(name, "plugin", retry, retryIf, delay, timeout, info, p.get(), null);
+                return new ExecutorRunner(name, "plugin", retry, retryIf, delay, timeout, until, within, every, info, p.get(), null);
             }
         }
         throw new IvyException("unknown step type \"" + name + "\" - user executors are: "

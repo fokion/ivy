@@ -67,6 +67,31 @@ step would ignore, such as `methd` for `method`. Use it in CI before running sui
 `retry` is a whole number; `delay` and `timeout` are seconds and may have a fraction (`delay: 0.5`).
 A step without a type runs nothing: it checks variables and the result of the step before it.
 
+## Waiting for a condition
+
+`until` runs a step again until an expression holds, then checks its assertions on that result:
+
+```yaml
+- type: http
+  url: ${base}/orders/${id}
+  until: result.body.status == "PLACED"   # an expression on the result
+  within: 10                               # seconds to wait at most (default 30)
+  every: 0.5                               # seconds between attempts (default 1)
+  assertions:
+  - result.body.barista != null
+```
+
+An attempt that fails to run, such as a request to a service that is not up yet, counts as "not yet".
+When `within` runs out, the step fails with the values the condition read:
+
+```
+until result.body.status == "PLACED" was still false after 10.2s (21 attempts, within 10s)
+  result.body.status = "RECEIVED"
+```
+
+`retry` is for the other case: running a step again while its assertions fail, such as a flaky call.
+A step uses one or the other.
+
 ## Writing tests with Claude (MCP)
 
 `ivy mcp` serves tools over stdio, so a model can write suites from a description or a Gherkin

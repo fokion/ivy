@@ -93,6 +93,44 @@ class ValidationTest {
     }
 
     @Test
+    void refusesWaitsThatCannotWork(@TempDir Path dir) throws Exception {
+        Path suite = Files.writeString(dir.resolve("s.yml"), """
+                name: s
+                testcases:
+                - name: both
+                  steps:
+                  - script: echo ok
+                    until: result.stdout == "ok"
+                    retry: 3
+                - name: lonely within
+                  steps:
+                  - script: echo ok
+                    within: 5
+                - name: busy
+                  steps:
+                  - script: echo ok
+                    until: result.stdout == "ok"
+                    every: 0
+                - name: nothing to wait for
+                  steps:
+                  - script: echo ok
+                  - until: result.stdout == "ok"
+                - name: fine
+                  steps:
+                  - script: echo ok
+                    until: result.stdout == "ok"
+                    within: 2.5
+                    every: 0.5
+                """);
+        String m = assertThrows(IvyException.class, () -> parse(suite)).getMessage();
+        assertTrue(m.contains("\"both\", step #1: a step waits with 'until'"), m);
+        assertTrue(m.contains("\"lonely within\", step #1: 'within' and 'every' go with 'until'"), m);
+        assertTrue(m.contains("\"busy\", step #1: 'every' must be more than 0 seconds"), m);
+        assertTrue(m.contains("\"nothing to wait for\", step #2: a step without a type runs nothing"), m);
+        assertTrue(!m.contains("\"fine\""), m);
+    }
+
+    @Test
     void warnsAboutResultFieldsTheConnectorDoesNotReport(@TempDir Path dir) throws Exception {
         Path suite = Files.writeString(dir.resolve("s.yml"), """
                 name: s

@@ -8,7 +8,7 @@ pass `$${HOME}` to a shell.
 
 ## Expressions
 
-`assertions`, `if`, `retryIf`, `range` and the values of `set` are expressions, a subset of JavaScript:
+`assertions`, `if`, `retryIf`, `until`, `range` and the values of `set` are expressions, a subset of JavaScript:
 
 ```yaml
 - script: curl -s localhost:8080/orders
@@ -52,7 +52,7 @@ In YAML, quote an expression that starts with `!` or holds `: `.
 | suite and test case `vars`, `--var`, `--var-from-file` | your values, nested as written |
 | names from `set` | values set by earlier steps of the test case |
 | `cases.<name>.<value>` | values set by an earlier test case (`cases["get token"].token`) |
-| `result` | the result of the step, in its assertions, `retryIf`, `info` and `set`; a step without a type runs nothing and gets the result of the step before it |
+| `result` | the result of the step, in its assertions, `retryIf`, `until`, `info` and `set`; a step without a type runs nothing and gets the result of the step before it |
 | `index`, `key`, `value` | the item of a ranged step |
 | `with` | variables of one step, in order: each value may use the ones before it (Gherkin captures come first) |
 | `input` | the inputs of a user executor |
