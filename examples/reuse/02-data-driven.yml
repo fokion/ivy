@@ -1,0 +1,34 @@
+# One block, many cases: `range` runs a step once per item, so a table of data is a loop, not copy-paste.
+#   ivy run examples/reuse/02-data-driven.yml
+name: data driven
+vars:
+  users:
+  - {id: 1, username: Bret}
+  - {id: 2, username: Antonette}
+  - {id: 3, username: Samantha}
+  missing: [0, 9999, 123456]
+testcases:
+- name: every user has the expected username
+  steps:
+  - range: ${users}
+    type: api_get
+    path: /users/${value.id}
+    assertions:
+    - result.body.username == value.username
+    info: user ${value.id} is ${result.body.username}
+
+- name: every user has posts
+  steps:
+  - range: ${users}
+    type: user_with_posts
+    userId: ${value.id}
+    assertions:
+    - result.postCount > 0
+    - result.username == value.username
+
+- name: users that do not exist
+  steps:
+  - range: ${missing}
+    type: api_get
+    path: /users/${value}
+    expect: 404

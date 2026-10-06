@@ -1,0 +1,50 @@
+# HTTP against a server the suite starts itself (python3 -m http.server), so it needs no network.
+# `until` waits for the server to come up; the last test case stops it.
+#   ivy run examples/getting-started/03-local-http.yml
+name: local http
+vars:
+  port: 8765
+  base: http://localhost:${port}
+testcases:
+- name: start a server
+  steps:
+  - script: |
+      nohup python3 -m http.server ${port} --directory "${ivy.suite.workdir}/site" >/dev/null 2>&1 &
+      echo $! > "${ivy.suite.workdir}/server.pid"
+  - type: http
+    url: ${base}/api/items.json
+    until: result.status == 200      # run again until this holds, then check the assertions
+    within: 10                       # give up after 10 seconds
+    every: 0.5                       # try every half second
+    info: server is up after ${ivy.step.number} steps
+
+- name: read a JSON document
+  steps:
+  - type: http
+    method: GET
+    url: ${base}/api/items.json
+    headers:
+      Accept: application/json
+    assertions:
+    - result.status == 200
+    - result.body.items.length == 3          # a JSON body is parsed into result.body
+    - result.body.items.some(i => i.name == "tea")
+    - result.headers["content-type"] contains "json"
+    - result.durationMs < 2000
+    set:
+      firstId: result.body.items[0].id
+  - type: http
+    url: ${base}/api/items.json
+    assertions:
+    - firstId == 1
+
+- name: a missing page is a 404, not an error
+  steps:
+  - type: http
+    url: ${base}/nope
+    assertions:
+    - result.status == 404
+
+- name: stop the server
+  steps:
+  - script: kill $(cat "${ivy.suite.workdir}/server.pid") && rm -f "${ivy.suite.workdir}/server.pid"

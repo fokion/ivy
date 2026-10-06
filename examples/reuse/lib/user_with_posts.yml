@@ -1,0 +1,17 @@
+# Block 3 is built from blocks 1: it calls api_get twice. Blocks can call blocks.
+executor: user_with_posts
+input:
+  userId: 1
+steps:
+- type: api_get
+  path: /users/${input.userId}
+  set:
+    user: result.body
+- type: api_get
+  path: /posts?userId=${input.userId}
+  set:
+    posts: result.body
+output:
+  name: ${user.name}
+  username: ${user.username}
+  postCount: ${posts.length}

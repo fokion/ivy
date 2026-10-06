@@ -1,0 +1,22 @@
+# Block 2: POST a JSON body and check the status.
+executor: api_post
+input:
+  base: https://jsonplaceholder.typicode.com
+  path: /posts
+  body: "{}"
+  expect: 201
+steps:
+- type: http
+  method: POST
+  url: ${input.base}${input.path}
+  headers:
+    Content-Type: application/json
+  body: ${input.body}
+  assertions:
+  - result.status == input.expect
+  set:
+    status: result.status
+    body: result.body
+output:
+  status: ${status}
+  body: ${body}

@@ -1,0 +1,224 @@
+name: Release
+
+# Every merge to master builds and publishes a release, and creates its tag once everything is built:
+#   native binaries linux-x64, linux-arm64, macos-arm64, windows-x64
+#   JVM distribution ivy with every connector bundle and the connector server (any OS with Java 25)
+#   Docker images ghcr.io/<owner>/ivy:<version> and :<version>-browser (linux/amd64, linux/arm64)
+#
+# The version is the last vX.Y.Z tag, bumped by the commits merged since:
+#   major  a commit message with "#major" or "BREAKING CHANGE"
+#   minor  a commit message with "#minor", or starting with "feat"
+#   patch  anything else
+# The first release is v0.1.0. Pushing a tag such as v1.2.3 by hand releases that version instead,
+# and "Run workflow" releases from master with the bump you choose.
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+    paths-ignore: [ '**.md', 'docs/**', 'examples/**' ]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: the part of the version to bump
+        type: choice
+        options: [ auto, patch, minor, major ]
+        default: auto
+
+permissions:
+  contents: write
+  packages: write
+
+# one release at a time, so that two merges never take the same version
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      release: ${{ steps.next.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: next
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$last" ]; then
+            next=0.1.0
+          elif [ "$(git rev-list -n 1 "$last")" = "$GITHUB_SHA" ]; then
+            echo "$GITHUB_SHA is already released as $last"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            bump=$BUMP
+            if [ "$bump" = auto ]; then
+              messages=$(git log "$last..$GITHUB_SHA" --format=%B)
+              if grep -qE '#major|BREAKING CHANGE' <<< "$messages"; then bump=major
+              elif grep -qE '#minor|^feat' <<< "$messages"; then bump=minor
+              else bump=patch; fi
+            fi
+            case $bump in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="$major.$((minor + 1)).0" ;;
+              *) next="$major.$minor.$((patch + 1))" ;;
+            esac
+          fi
+          echo "after ${last:-no release}: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+  native:
+    name: native ${{ matrix.platform }}
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux-x64 }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64 }
+          - { os: macos-latest, platform: macos-arm64 }
+          - { os: windows-latest, platform: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: graalvm-community
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: gradle
+      - name: Native binary
+        run: >
+          ./gradlew :ivy-cli:build -x test -PivyVersion="$VERSION"
+          -Dquarkus.native.enabled=true -Dquarkus.package.jar.enabled=false
+      - name: Package
+        run: |
+          name="ivy-$VERSION-${{ matrix.platform }}"
+          mkdir "$name"
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          cp "ivy-cli/build/ivy-cli-$VERSION-runner$ext" "$name/ivy$ext"
+          cp LICENSE NOTICE README.md "$name/"
+          "$name/ivy$ext" version
+          if [ "${{ runner.os }}" = "Windows" ]; then 7z a "$name.zip" "$name" > /dev/null; else tar -czf "$name.tar.gz" "$name"; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.platform }}
+          path: ivy-*-${{ matrix.platform }}.*
+
+  jvm:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          java-version: 25
+          distribution: temurin
+          cache: gradle
+      - name: Build and test
+        run: ./gradlew build bundle :ivy-connector-server:installDist -PivyVersion="$VERSION"
+      - name: Package
+        run: |
+          name="ivy-$VERSION-jvm"
+          mkdir -p "$name/bin" "$name/bundles"
+          cp -r ivy-cli/build/quarkus-app "$name/app"
+          cp connectors/*/build/bundle/*.jar "$name/bundles/"
+          cp -r ivy-connector-server/build/install/ivy-connector-server "$name/connector-server"
+          cp LICENSE NOTICE README.md "$name/"
+          cat > "$name/bin/ivy" <<'SH'
+          #!/bin/sh
+          # ivy on the JVM (Java 25), with the connector bundles next to it
+          home="$(cd "$(dirname "$0")/.." && pwd)"
+          export IVY_BUNDLES_DIR="${IVY_BUNDLES_DIR:-$home/bundles}"
+          exec java --enable-native-access=ALL-UNNAMED $JAVA_OPTS -jar "$home/app/quarkus-run.jar" "$@"
+          SH
+          chmod +x "$name/bin/ivy"
+          "$name/bin/ivy" version
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jvm
+          path: ivy-*-jvm.tar.gz
+
+  docker:
+    # after the tests of the jvm job, so that no image is published from a failing build
+    needs: [ version, jvm ]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ivy" >> "$GITHUB_ENV"
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: ivy
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ivy
+          platforms: linux/amd64,linux/arm64
+          build-args: IVY_VERSION=${{ env.VERSION }}
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }},${{ env.IMAGE }}:latest
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: ivy with the browser connector
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: browser
+          platforms: linux/amd64,linux/arm64
+          build-args: IVY_VERSION=${{ env.VERSION }}
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }}-browser,${{ env.IMAGE }}:latest-browser
+          push: true
+          cache-from: type=gha
+
+  release:
+    # the tag is created here, once every artifact is built
+    needs: [ version, native, jvm, docker ]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ivy-* > checksums.txt
+          cat checksums.txt
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "v$VERSION" dist/*
+          --target "$GITHUB_SHA" --title "ivy $VERSION" --generate-notes

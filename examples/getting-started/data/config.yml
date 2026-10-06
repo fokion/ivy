@@ -1,0 +1,4 @@
+service:
+  name: api
+  replicas: 3
+  ports: [8080, 9090]

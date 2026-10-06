@@ -1,0 +1,10 @@
+# Step definitions for the Gherkin features. `expression` uses Cucumber expressions
+# ({string}, {int}, ...), `match` a regular expression. Captures are arg1, arg2... and
+# a step that has no `step:` only checks the result of the one before it.
+steps:
+  - expression: 'I run {string}'
+    step: { script: "${arg1}" }
+  - expression: 'the exit code is {int}'
+    assertions: [ "result.exitCode == arg1" ]
+  - expression: 'the output is {string}'
+    assertions: [ "result.stdout == arg1" ]

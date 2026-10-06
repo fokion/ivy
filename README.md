@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/ivy-logo.png" alt="ivy" width="420"></p>
+
 # ivy
 
 A declarative integration-test runner. Write suites in YAML or Gherkin; each step runs a connector
@@ -19,8 +21,30 @@ testcases:
       first: result.body.items[0].id
 ```
 
+New to ivy? Start with the [getting-started guide](docs/guide.md) and the runnable
+[examples](examples/README.md).
+
 Templates are `${...}`, assertions are expressions; see [docs/expressions.md](docs/expressions.md).
 Secrets are hidden in logs and reports; see [docs/secrets.md](docs/secrets.md).
+
+## Install
+
+| How | What you get |
+|---|---|
+| `brew install fokion/tap/ivy` | the native binary (macOS on Apple Silicon, Linux x64 and arm64) |
+| [Releases](https://github.com/fokion/ivy/releases) | native binaries for Linux x64/arm64, macOS arm64 and Windows x64; `ivy-<version>-jvm.tar.gz`, ivy on Java 25 with every connector bundle |
+| `docker run --rm -v "$PWD:/work" ghcr.io/fokion/ivy run tests/` | ivy with every connector bundle but the browser |
+| `ghcr.io/fokion/ivy:latest-browser` | the same, plus the browser connector and Chromium |
+
+The native binary has the built-in steps (`exec`, `http`, `readfile`); the other connectors are
+bundles for the JVM, served to it by `ivy-connector-server` (included in the JVM archive). A binary
+downloaded with a browser on macOS is quarantined: `xattr -d com.apple.quarantine ivy`.
+
+As an MCP server from Docker:
+
+```shell
+claude mcp add ivy -- docker run --rm -i -v "$PWD:/work" ghcr.io/fokion/ivy mcp --workspace /work
+```
 
 ## Build and run
 
@@ -169,3 +193,30 @@ Bundles are loaded with `--bundles-dir` on the JVM, or served to the native bina
 | Benchmark (parallel suites, memory) | `./gradlew :ivy-core:perfTest` |
 | Connector bundles | `./gradlew bundle` (in `connectors/*/build/bundle`) |
 | HTML report (Node) | `./gradlew ivyReport` |
+| Docker image | `docker build -t ivy .` (`--target browser` for the browser connector and Chromium) |
+
+### Releasing
+
+Every merge to `master` publishes a release; changes to Markdown, `docs/` and `examples/` alone do not.
+The [release workflow](.github/workflows/release.yml) takes the next version after the last `vX.Y.Z`
+tag, from the messages of the commits merged since:
+
+| Commit message | Version after v1.4.2 |
+|---|---|
+| anything | v1.4.3 |
+| starts with `feat`, or contains `#minor` | v1.5.0 |
+| contains `#major` or `BREAKING CHANGE` | v2.0.0 |
+
+It builds the native binaries with GraalVM for JDK 25 on Linux x64/arm64, macOS arm64 and Windows x64,
+the JVM archive (after the tests pass) and the Docker images (`linux/amd64`, `linux/arm64`). Only when
+all of them are built does it create the tag and the GitHub release, with `checksums.txt`. The first
+release is v0.1.0. A tag pushed by hand (`git tag v1.2.3 && git push origin v1.2.3`) releases that
+version, and "Run workflow" on the Actions tab releases `master` with the bump you pick.
+
+To make a Homebrew formula for a release:
+`packaging/homebrew/render-formula.sh <version> checksums.txt fokion/ivy > ivy.rb`.
+
+## License
+
+[Apache License 2.0](LICENSE). ivy started as a port of [Venom](https://github.com/ovh/venom) (Apache
+2.0); see [NOTICE](NOTICE).

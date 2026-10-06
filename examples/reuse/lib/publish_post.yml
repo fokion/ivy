@@ -1,0 +1,15 @@
+# Block 4: a business action, "publish a post", made from api_post. The caller says what, not how.
+executor: publish_post
+input:
+  userId: 1
+  title: untitled
+steps:
+- type: api_post
+  path: /posts
+  body: '{"userId": ${input.userId}, "title": "${input.title}", "body": "written by ivy"}'
+  set:
+    created: result.body
+output:
+  id: ${created.id}
+  title: ${created.title}
+  userId: ${created.userId}

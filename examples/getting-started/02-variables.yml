@@ -1,0 +1,48 @@
+# Variables, `set`, values shared between test cases, `if` and `must`.
+#   ivy run examples/getting-started/02-variables.yml --var greeting=bonjour
+name: variables
+vars:
+  greeting: hello          # a suite variable; --var greeting=... overrides it
+  user:
+    name: ada
+    langs: [java, yaml]
+testcases:
+- name: use variables in a template
+  steps:
+  - script: echo "${greeting} ${user.name}, you write ${user.langs[0]}"
+    assertions:
+    - result.stdout contains user.name        # assertions are expressions: no ${}
+    set:
+      line: result.stdout                     # `set` keeps a value for later steps
+  - name: a step without a type only checks
+    assertions:
+    - line contains "ada"
+    - user.langs.length == 2
+
+- name: produce a value
+  steps:
+  - script: |
+      echo '{"token": "abc123", "ids": [7, 8, 9]}'
+    set:
+      token: result.json.token
+      lastId: result.json.ids[-1]
+
+- name: read the value of an earlier test case
+  steps:
+  - script: echo "token is ${cases["produce a value"].token}"
+    assertions:
+    - result.stdout == "token is abc123"
+    - cases["produce a value"].lastId == 9
+
+- name: must stops the test case when it fails
+  steps:
+  - script: echo ready
+    assertions:
+    - must: result.stdout == "ready"   # if this were false, the next step would not run
+    - result.exitCode == 0
+  - script: echo "still running"
+
+- name: only on CI
+  if: env.CI == "true"                 # a test case (or a step) can be skipped with an expression
+  steps:
+  - script: echo "running in CI"

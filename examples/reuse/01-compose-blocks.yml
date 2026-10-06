@@ -1,0 +1,35 @@
+# The same four blocks (lib/) used from the simple to the composed.
+#   ivy run examples/reuse/01-compose-blocks.yml
+name: compose blocks
+testcases:
+- name: a block with its defaults
+  steps:
+  - type: api_get                       # GET /users/1, expects 200
+    assertions:
+    - result.body.username == "Bret"
+
+- name: the same block, other inputs
+  steps:
+  - type: api_get
+    path: /users/9999
+    expect: 404                         # a negative test is the same block with another `expect`
+    assertions:
+    - isEmpty(result.body)
+
+- name: a block built from blocks
+  steps:
+  - type: user_with_posts
+    userId: 2
+    assertions:
+    - result.username == "Antonette"
+    - result.postCount == 10
+
+- name: a business action
+  steps:
+  - type: publish_post
+    userId: 3
+    title: hello from ivy
+    assertions:
+    - result.title == "hello from ivy"
+    - result.userId == 3
+    - result.id > 0

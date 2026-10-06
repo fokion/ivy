@@ -1,0 +1,17 @@
+# Block 1: GET a path of the API and check the status. The smallest useful block.
+executor: api_get
+input:
+  base: https://jsonplaceholder.typicode.com
+  path: /users/1
+  expect: 200                      # the status this call must return
+steps:
+- type: http
+  url: ${input.base}${input.path}
+  assertions:
+  - result.status == input.expect
+  set:
+    status: result.status
+    body: result.body
+output:
+  status: ${status}
+  body: ${body}

@@ -1,0 +1,15 @@
+# Gherkin steps are thin wrappers: each one just calls a block from ../../lib (the same blocks the YAML
+# suites use). The feature says what happens; the block says how.
+steps:
+  - expression: 'I look up user {int}'
+    step: { type: api_get, path: "/users/${arg1}" }
+  - expression: 'I look up user {int} expecting {int}'
+    step: { type: api_get, path: "/users/${arg1}", expect: "${arg2}" }
+  - expression: 'I look up the posts of user {int}'
+    step: { type: user_with_posts, userId: "${arg1}" }
+  - expression: 'the username is {string}'
+    assertions: [ "result.body.username == arg1" ]
+  - expression: 'they have {int} posts'
+    assertions: [ "result.postCount == arg1" ]
+  - expression: 'the response body is empty'
+    assertions: [ "isEmpty(result.body)" ]

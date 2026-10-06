@@ -1,0 +1,10 @@
+# A user executor: a reusable step. Call it with `type: greet`.
+executor: greet
+input:
+  name: world            # default value
+steps:
+- script: echo "hello ${input.name}"
+  set:
+    message: result.stdout
+output:
+  message: ${message}

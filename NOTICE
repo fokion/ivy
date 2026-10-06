@@ -1,5 +1,17 @@
+ivy
+Copyright 2026 Fokion Sotiropoulos
+
+Licensed under the Apache License, Version 2.0; see the LICENSE file.
+
+ivy started as a port to Java of Venom (https://github.com/ovh/venom),
+Copyright OVH SAS and the Venom contributors, licensed under the Apache License, Version 2.0.
+
 ivy reproduces the behaviour of these Go libraries:
 - template helpers from Masterminds/sprig (MIT), aokoli/goutils (Apache 2.0) and huandu/xstrings (MIT)
 - value flattening from fsamin/go-dump (Apache 2.0)
 - natural date parsing from tj/go-naturaldate (MIT)
 - type conversions from spf13/cast (MIT) and slugs from gosimple/slug (MPL 2.0)
+
+The connector bundles and the native binaries include third-party libraries under their own licenses,
+among them Quarkus, the Kafka clients and Playwright (Apache 2.0), the PostgreSQL JDBC driver (BSD-2-Clause),
+the SQLite JDBC driver (Apache 2.0), and the MongoDB, Redis and Couchbase clients.

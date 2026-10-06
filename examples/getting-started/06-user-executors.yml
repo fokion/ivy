@@ -1,0 +1,16 @@
+# Reusable steps: lib/greet.yml defines the `greet` step type (ivy looks in ./lib next to where you run it
+# and next to the suite; --lib-dir adds more).
+#   ivy run examples/getting-started/06-user-executors.yml
+name: user executors
+testcases:
+- name: use the default input
+  steps:
+  - type: greet
+    assertions:
+    - result.message == "hello world"
+- name: pass an input
+  steps:
+  - type: greet
+    name: ivy
+    assertions:
+    - result.message == "hello ivy"

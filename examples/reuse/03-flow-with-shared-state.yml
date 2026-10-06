@@ -1,0 +1,27 @@
+# A flow: test cases that hand values to the next ones, still built from the same blocks.
+#   ivy run examples/reuse/03-flow-with-shared-state.yml
+name: flow
+testcases:
+- name: pick a user
+  steps:
+  - type: api_get
+    path: /users/4
+    set:
+      userId: result.body.id
+      email: result.body.email
+
+- name: publish a post as that user
+  steps:
+  - type: publish_post
+    userId: ${cases["pick a user"].userId}
+    title: report for ${cases["pick a user"].email}
+    assertions:
+    - result.userId == cases["pick a user"].userId
+    set:
+      postTitle: result.title
+
+- name: summarise with a shell step, mixed with the blocks
+  steps:
+  - script: echo "${cases["publish a post as that user"].postTitle}" | wc -c | tr -d ' '
+    assertions:
+    - number(result.stdout) > 10

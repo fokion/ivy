@@ -4,7 +4,8 @@ plugins {
 
 allprojects {
     group = 'xyz.fokion'
-    version = '0.0.1'
+    // releases set it from the tag: ./gradlew build -PivyVersion=1.2.3
+    version = findProperty('ivyVersion') ?: '0.0.1'
 
     repositories {
         mavenCentral()

@@ -1,0 +1,26 @@
+# The smallest suite: run a command, check what it printed.
+#   ivy run examples/getting-started/01-hello.yml
+name: hello
+testcases:
+- name: say hello
+  steps:
+  - script: echo "hello ivy"
+    assertions:
+    - result.exitCode == 0
+    - result.stdout == "hello ivy"
+    - result.stdout contains "ivy"
+    info: the command printed "${result.stdout}"
+
+- name: a command that fails on purpose is still a result you can check
+  steps:
+  - script: echo oops >&2; exit 3
+    assertions:
+    - result.exitCode == 3
+    - result.stderr == "oops"
+
+- name: a command given as a list, without a shell
+  steps:
+  - type: exec
+    command: [printf, "%s-%s", ivy, rocks]
+    assertions:
+    - result.stdout == "ivy-rocks"

@@ -1,0 +1,45 @@
+# readfile, `range` (loops), `retry` and `until`.
+#   ivy run examples/getting-started/04-files-loops-retries.yml
+name: files, loops and retries
+testcases:
+- name: readfile parses JSON and YAML
+  steps:
+  - type: readfile
+    path: data/config.yml                  # relative to the suite
+    assertions:
+    - result.json.service.name == "api"
+    - result.json.service.ports.length == 2
+    - result.files[0].size > 0
+
+- name: one step, many runs
+  steps:
+  - range: [red, green, blue]              # a list; also a map, a number (3) or a variable
+    script: echo ${index}=${value}
+    assertions:
+    - result.stdout == index + "=" + value
+  - range:
+      one: 1
+      two: 2
+    script: echo ${key}=${value}
+    assertions:
+    - result.stdout == key + "=" + value
+
+- name: retry a flaky step while its assertions fail
+  steps:
+  - script: rm -f "${ivy.suite.workdir}/flaky.txt"
+  - script: |
+      echo x >> "${ivy.suite.workdir}/flaky.txt"
+      wc -l < "${ivy.suite.workdir}/flaky.txt" | tr -d ' '
+    retry: 5                               # at most 5 more attempts
+    delay: 0.2                             # seconds between them
+    assertions:
+    - result.stdout == 3                   # passes on the 3rd attempt
+  - script: rm -f "${ivy.suite.workdir}/flaky.txt"
+
+- name: wait until a condition holds
+  steps:
+  - script: touch "${ivy.suite.workdir}/ready.flag" ; ls "${ivy.suite.workdir}"
+    until: result.stdout contains "ready.flag"   # an expression on the result
+    within: 5                                    # seconds to wait at most
+    every: 0.5                                   # seconds between attempts
+  - script: rm -f "${ivy.suite.workdir}/ready.flag"
